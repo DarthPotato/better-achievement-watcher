@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "better-achievement-watcher"
+version = "0.1.0"
+description = "Achievement popups and tracker for Steam emulator saves (Goldberg, GSE, CODEX, RUNE, EMPRESS, OnlineFix, ...)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+icons = ["Pillow>=9.0"]
+
+[project.gui-scripts]
+better-achievement-watcher = "baw.__main__:main"
+
+[tool.setuptools]
+packages = ["baw"]

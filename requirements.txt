@@ -1,0 +1,2 @@
+# Optional: achievement icons in popups and the viewer. Everything else is standard library.
+Pillow>=9.0
