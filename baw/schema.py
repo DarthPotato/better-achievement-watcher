@@ -14,6 +14,7 @@ Results are cached on disk so the app works offline after the first lookup.
 
 import hashlib
 import json
+import re
 import struct
 import threading
 import time
@@ -105,6 +106,12 @@ def _localized(value, language: str) -> str:
     return "" if value is None else str(value)
 
 
+def _real_name(name) -> str:
+    """Steam's cache names some games "ValveTestApp<n>"; treat that as unknown."""
+    name = "" if name is None else str(name)
+    return "" if re.fullmatch(r"ValveTestApp\d*", name.strip()) else name
+
+
 def _icon_url(appid: int, icon: str) -> str:
     if not icon or icon.startswith("http"):
         return icon or ""
@@ -165,7 +172,7 @@ def schema_from_steam_cache(appid: int, language: str, steam_dir: Optional[Path]
     except (OSError, ValueError, struct.error):
         return None
     game = root.get(str(appid)) or next((v for v in root.values() if isinstance(v, dict)), {})
-    schema = GameSchema(appid, str(game.get("gamename", "")), source="Steam cache")
+    schema = GameSchema(appid, _real_name(game.get("gamename")), source="Steam cache")
     for stat in (game.get("stats") or {}).values():
         if not isinstance(stat, dict) or not isinstance(stat.get("bits"), dict):
             continue
@@ -324,6 +331,7 @@ class SchemaStore:
                 schema = GameSchema.from_json(json.loads(self._cache_path(appid).read_text(encoding="utf-8")))
             except (OSError, ValueError, KeyError, TypeError):
                 return None
+            schema.name = _real_name(schema.name)
             self._schemas[appid] = schema
             return schema
 
@@ -335,6 +343,8 @@ class SchemaStore:
                 return self._fixed[appid]
         schema = self.cached(appid)
         if schema and schema.achievements and all(n in schema.achievements for n in needed):
+            if not schema.name:
+                self._fill_name(schema)
             return schema
         with self._lock:
             last_fail = self._failed.get(appid, 0)
@@ -358,6 +368,24 @@ class SchemaStore:
                 schema = GameSchema(appid, fresh.name or self._local_names.get(appid, ""))
                 self._schemas[appid] = schema
             return schema
+
+    def _fill_name(self, schema: GameSchema) -> None:
+        """Look up a missing game name (e.g. a cached schema from before names were fixed)."""
+        with self._lock:
+            if schema.appid in self._failed or self.offline:
+                schema.name = schema.name or self._local_names.get(schema.appid, "")
+                return
+        name = game_name_from_store(schema.appid)
+        with self._lock:
+            if not name:
+                self._failed[schema.appid] = time.time()
+                schema.name = self._local_names.get(schema.appid, "")
+                return
+            schema.name = name
+            try:
+                self._cache_path(schema.appid).write_text(json.dumps(schema.to_json(), indent=1), encoding="utf-8")
+            except OSError:
+                pass
 
     def _build(self, appid: int) -> GameSchema:
         lang = self.config.language or "english"
