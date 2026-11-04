@@ -162,6 +162,14 @@ def _local_save_dirs(dll_dir: Path) -> List[Path]:
         match = re.search(r"^\s*local_save_path\s*=\s*(.+?)\s*$", _read_small(ini), re.I | re.M)
         if match:
             found.append(match.group(1))
+    # steam_emu.ini & co. sometimes name their own save folder (SavePath=, SaveDirectory=, ...).
+    try:
+        inis = [p for p in dll_dir.iterdir() if p.suffix.lower() == ".ini"]
+    except OSError:
+        inis = []
+    for ini in inis:
+        for match in re.finditer(r"^\s*\w*save\w*\s*=\s*(.*[\\/%].*?)\s*$", _read_small(ini), re.I | re.M):
+            found.append(match.group(1))
     result = []
     for value in found:
         path = Path(os.path.expandvars(value.strip('"')))

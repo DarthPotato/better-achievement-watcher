@@ -307,3 +307,25 @@ class MoreDetectionTests(unittest.TestCase):
         with mock.patch.object(notify, "steam_install_dir", return_value=steam):
             self.assertEqual(notify.sound_path(Config()).name, "deck_ui_achievement_toast.wav")
             self.assertEqual(notify.sound_path(Config(sound_style="chime")).name, "chime.wav")
+
+
+class EmulatorGroupTests(unittest.TestCase):
+    def test_any_group_under_public_documents_steam(self):
+        base = Path(tempfile.mkdtemp(dir=TMP))
+        write(base / "Public/Documents/Steam/PLAZA/239140/achievements.ini", "[ACH_A]\nAchieved=1\n")
+        write(base / "Roaming/Steam/ANKER/2198150/achievements.ini", "[ACH_B]\nAchieved=1\n")
+        env = {"APPDATA": str(base / "Roaming"), "PUBLIC": str(base / "Public"),
+               "LOCALAPPDATA": str(base / "Local"), "PROGRAMDATA": str(base / "PD"), "USERPROFILE": str(base / "U")}
+        with mock.patch.dict(os.environ, env):
+            saves = scan_save_roots(Config(include_steam_library=False))
+        self.assertEqual(sorted((s.appid, s.emulator) for s in saves), [(239140, "PLAZA"), (2198150, "ANKER")])
+
+    def test_steam_emu_ini_save_path(self):
+        lib = Path(tempfile.mkdtemp(dir=TMP))
+        saves_dir = Path(tempfile.mkdtemp(dir=TMP))
+        write(lib / "G" / "steam_api64.dll", "")
+        write(lib / "G" / "steam_emu.ini", f"[Settings]\nAppId=239140\nSavePath={saves_dir}\n")
+        write(saves_dir / "239140" / "achievements.ini", "[ACH_A]\nAchieved=1\n")
+        game = scan_game_folder(lib)[0]
+        self.assertEqual(game.appid, 239140)
+        self.assertEqual([s.appid for s in game.saves], [239140])
