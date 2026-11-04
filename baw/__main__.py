@@ -10,6 +10,7 @@
 import argparse
 import datetime
 import sys
+from pathlib import Path
 
 from . import APP_NAME, __version__
 from .config import Config
@@ -79,9 +80,16 @@ def cmd_doctor(config: Config) -> int:
     if not game_folder_list(config):
         print("  (none found - add your games folder in Settings to catch local saves)")
     print("\nGames found in game folders:")
+    # A game can have steam_api in several sub-folders (tools, fixes); list it once.
+    grouped = {}
     for game in scan_game_folders(config):
-        print(f"  AppID {game.appid:<8} {game.name}  dll: {game.path}")
-        print(f"      schema: {game.schema_file or '-'}  saves: {len(game.saves)}")
+        grouped.setdefault((game.appid, game.name), []).append(game)
+    for (appid, name), copies in grouped.items():
+        main_copy = min(copies, key=lambda g: len(g.path.parts))
+        extra = f"  (+{len(copies) - 1} more steam_api folders)" if len(copies) > 1 else ""
+        print(f"  AppID {appid:<8} {name}  dll: {main_copy.path}{extra}")
+        schema = next((g.schema_file for g in copies if g.schema_file), None)
+        print(f"      schema: {schema or '-'}  saves: {sum(len(g.saves) for g in copies)}")
     return 0
 
 
@@ -100,12 +108,36 @@ def cmd_test_popup(config: Config) -> int:
     return 0
 
 
+def offer_install(config: Config) -> bool:
+    """Ask once whether to move the exe to its standard place. Returns True to install."""
+    import tkinter as tk
+    from tkinter import messagebox
+
+    from .install import install_dir
+
+    root = tk.Tk()
+    root.withdraw()
+    answer = messagebox.askyesno(
+        APP_NAME,
+        f"Install {APP_NAME}?\n\nIt will move to\n{install_dir()}\nand get a Start menu shortcut. "
+        "Your settings are kept.\n\nChoose No to keep running it from here (you won't be asked again).",
+        parent=root)
+    root.destroy()
+    if not answer:
+        config.offer_install = False
+        config.save()
+    return answer
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="baw", description=APP_NAME)
     parser.add_argument("command", nargs="?", default="gui", choices=["gui", "scan", "doctor", "test-popup"])
     parser.add_argument("--background", action="store_true", help="start hidden, only show popups")
     parser.add_argument("--offline", action="store_true", help="don't contact Steam (use cached/local names)")
     parser.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
+    # Used by the exe itself: install/update this copy, and delete a replaced copy afterwards.
+    parser.add_argument("--install", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--cleanup", metavar="PATH", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     for stream in (sys.stdout, sys.stderr):
         # Piped output defaults to the ANSI code page, which can't encode e.g. Japanese names.
@@ -121,6 +153,23 @@ def main(argv=None) -> int:
         return cmd_doctor(config)
     if args.command == "test-popup":
         return cmd_test_popup(config)
+
+    from . import install
+
+    exe = install.running_exe()
+    if exe is not None and args.install:
+        target = install.install(exe)
+        install.launch(target, "--cleanup", str(exe))
+        return 0
+    if exe is not None and not args.background and not install.is_installed(exe) and config.offer_install:
+        if offer_install(config):
+            target = install.install(exe)
+            install.launch(target, "--cleanup", str(exe))
+            return 0
+    if args.cleanup:
+        import threading
+
+        threading.Thread(target=install.delete_later, args=(Path(args.cleanup),), daemon=True).start()
 
     from .app import App, notify_running_instance
 

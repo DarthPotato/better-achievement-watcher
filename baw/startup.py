@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from typing import Optional
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "BetterAchievementWatcher"
@@ -11,7 +12,9 @@ def supported() -> bool:
     return sys.platform == "win32"
 
 
-def command() -> str:
+def command(exe: Optional[Path] = None) -> str:
+    if exe is not None:
+        return f'"{exe}" --background'
     if getattr(sys, "frozen", False):
         return f'"{sys.executable}" --background'
     python = Path(sys.executable)
@@ -33,14 +36,14 @@ def is_enabled() -> bool:
         return False
 
 
-def set_enabled(enabled: bool) -> None:
+def set_enabled(enabled: bool, exe: Optional[Path] = None) -> None:
     if not supported():
         return
     import winreg
 
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
         if enabled:
-            winreg.SetValueEx(key, VALUE_NAME, 0, winreg.REG_SZ, command())
+            winreg.SetValueEx(key, VALUE_NAME, 0, winreg.REG_SZ, command(exe))
         else:
             try:
                 winreg.DeleteValue(key, VALUE_NAME)

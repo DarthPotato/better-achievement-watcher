@@ -11,7 +11,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Dict, List, Optional
 
-from . import APP_NAME, __version__, startup
+from . import APP_NAME, __version__, install, startup, update
 from .config import Config
 from .notify import Notifier, PopupSpec, demo_spec, enable_dpi_awareness, load_icon
 from .parsers import AchievementState
@@ -29,7 +29,7 @@ FILTERS = {
     "Emulators & other": lambda emulators: STEAM_SOURCE not in emulators,
 }
 
-INSTANCE_PORT = 47863
+INSTANCE_PORT = install.INSTANCE_PORT
 BURST_LIMIT = 3  # individual popups per batch; the rest are summarised
 
 
@@ -81,6 +81,8 @@ class App:
         self._start_instance_server()
         startup.repair()
         threading.Thread(target=self._worker, name="worker", daemon=True).start()
+        if install.running_exe() is not None and self.config.check_updates:
+            self.work_queue.put(("update_check",))
         self.watcher.start()
         self.root.after(100, self._drain_ui_queue)
         self.root.mainloop()
@@ -122,8 +124,11 @@ class App:
                     return
                 with conn:
                     try:
-                        if conn.recv(16).startswith(b"show"):
+                        message = conn.recv(16)
+                        if message.startswith(b"show"):
                             self.ui_queue.put(("show",))
+                        elif message.startswith(b"quit"):
+                            self.ui_queue.put(("quit",))
                     except OSError:
                         pass
 
@@ -151,6 +156,12 @@ class App:
                     self.watcher.scan_game_folders()
                     self.watcher.discover(notify=False)
                     self.ui_queue.put(("refresh",))
+                elif kind == "update_check":
+                    release = update.latest_release()
+                    if release and update.is_newer(release.version):
+                        self.ui_queue.put(("update", release))
+                elif kind == "update_download":
+                    self._download_update(job[1])
             except Exception as exc:
                 print(f"[worker] {exc!r}")
 
@@ -176,6 +187,15 @@ class App:
             self.store.icon_file(appid, info, gray=not unlocked)
         self.ui_queue.put(("achievements", appid))
 
+    def _download_update(self, release: "update.Release") -> None:
+        """Download the new exe and run it as installer; it quits this copy and replaces it."""
+        try:
+            target = Path(os.environ.get("TEMP") or Path.home()) / "BetterAchievementWatcher-update" / update.EXE_NAME
+            update.download(release.exe_url, target)
+            install.launch(target, "--install")
+        except Exception as exc:
+            self.ui_queue.put(("update_failed", str(exc)))
+
     def _drain_ui_queue(self) -> None:
         try:
             while True:
@@ -189,6 +209,14 @@ class App:
                     self._show_achievements(event[1])
                 elif kind == "show":
                     self.show_window()
+                elif kind == "quit":
+                    self.quit()
+                    return
+                elif kind == "update":
+                    self._offer_update(event[1])
+                elif kind == "update_failed":
+                    self.update_label.configure(text=f"Update failed: {event[1]}")
+                    self.update_button.state(["!disabled"])
         except queue.Empty:
             pass
         self.root.after(100, self._drain_ui_queue)
@@ -208,6 +236,15 @@ class App:
         ttk.Button(bar, text="Settings", command=self.open_settings).pack(side="right", padx=2)
         ttk.Button(bar, text="Test popup", command=lambda: self.notifier.show(demo_spec())).pack(side="right", padx=2)
         ttk.Button(bar, text="Rescan", command=self.rescan).pack(side="right", padx=2)
+
+        self.update_bar = ttk.Frame(self.root, padding=(8, 0, 8, 6))
+        self.update_label = ttk.Label(self.update_bar, text="", foreground="#1a6e2e")
+        self.update_label.pack(side="left")
+        self.update_button = ttk.Button(self.update_bar, text="Update now")
+        self.update_button.pack(side="left", padx=8)
+        self.update_notes = ttk.Button(self.update_bar, text="What's new")
+        self.update_notes.pack(side="left")
+        self._update_anchor = bar
 
         panes = ttk.PanedWindow(self.root, orient="horizontal")
         panes.pack(fill="both", expand=True, padx=8)
@@ -408,6 +445,25 @@ class App:
             self.ach_tree.insert("", "end", text=title, image=icon, values=(desc, when, rarity),
                                  tags=() if is_unlocked else ("locked",))
 
+    def _offer_update(self, release: "update.Release") -> None:
+        import webbrowser
+
+        self.update_label.configure(text=f"Version {release.version} is available (you have {__version__}).")
+        self.update_button.configure(command=lambda: self._start_update(release))
+        self.update_notes.configure(command=lambda: webbrowser.open(release.page_url))
+        self.update_bar.pack(fill="x", after=self._update_anchor)
+        if self.root.state() == "withdrawn" and self.config.update_notified != release.version:
+            # Running hidden in the background: say it once with a popup.
+            self.config.update_notified = release.version
+            self.config.save()
+            self.notifier.show(PopupSpec(APP_NAME, f"Version {release.version} is available",
+                                         "Open the app to update.", header="Update available"))
+
+    def _start_update(self, release: "update.Release") -> None:
+        self.update_label.configure(text=f"Downloading version {release.version}...")
+        self.update_button.state(["disabled"])
+        self.work_queue.put(("update_download", release))
+
     def rescan(self) -> None:
         self.store.forget()
         self._schema_requested.clear()
@@ -446,6 +502,7 @@ class SettingsDialog:
         self.defaults = tk.BooleanVar(value=cfg.scan_default_locations)
         self.keep = tk.BooleanVar(value=cfg.keep_running_on_close)
         self.autostart = tk.BooleanVar(value=startup.is_enabled())
+        self.check_updates = tk.BooleanVar(value=cfg.check_updates)
         self.common = tk.BooleanVar(value=cfg.scan_common_game_folders)
         self.steam_library = tk.BooleanVar(value=cfg.include_steam_library)
         self.steam_uninstalled = tk.BooleanVar(value=cfg.include_uninstalled_steam)
@@ -474,6 +531,7 @@ class SettingsDialog:
         ttk.Checkbutton(body, text="Keep watching when the window is closed", variable=self.keep).pack(anchor="w")
         if startup.supported():
             ttk.Checkbutton(body, text="Start with Windows (in the background)", variable=self.autostart).pack(anchor="w")
+        ttk.Checkbutton(body, text="Check for updates at startup", variable=self.check_updates).pack(anchor="w")
 
         ttk.Label(body, text="Checked locations:").pack(anchor="w", pady=(8, 0))
         info = tk.Text(body, height=6, wrap="none", font=("Consolas", 9))
@@ -573,6 +631,7 @@ class SettingsDialog:
         cfg.keep_running_on_close = self.keep.get()
         cfg.scan_common_game_folders = self.common.get()
         cfg.include_steam_library = self.steam_library.get()
+        cfg.check_updates = self.check_updates.get()
         cfg.include_uninstalled_steam = self.steam_uninstalled.get()
         for key, value in self._sound_settings().items():
             setattr(cfg, key, value)

@@ -556,3 +556,58 @@ class NameAndFilterTests(unittest.TestCase):
         self.assertFalse(FILTERS["Steam"]({"RUNE"}))
         self.assertTrue(FILTERS["Emulators & other"]({"RUNE", "Local save"}))
         self.assertTrue(all(FILTERS["All games"](e) for e in ({"Steam"}, {"RUNE"})))
+
+
+class UpdateInstallTests(unittest.TestCase):
+    def test_versions(self):
+        from baw.update import is_newer, parse_version
+
+        self.assertEqual(parse_version("v1.7.1"), (1, 7, 1))
+        self.assertEqual(parse_version("nightly"), ())
+        self.assertTrue(is_newer("1.8.0", "1.7.1"))
+        self.assertTrue(is_newer("v1.7.10", "1.7.9"))
+        self.assertFalse(is_newer("1.7.1", "1.7.1"))
+        self.assertFalse(is_newer("1.8.0", "dev"))
+
+    def test_latest_release_needs_the_exe(self):
+        from baw import update
+
+        def fake(data):
+            response = mock.MagicMock()
+            response.__enter__.return_value.read.return_value = json.dumps(data).encode()
+            return mock.patch.object(update.urllib.request, "urlopen", return_value=response)
+
+        asset = {"name": "BetterAchievementWatcher.exe", "browser_download_url": "https://x/BAW.exe"}
+        with fake({"tag_name": "v1.8.0", "html_url": "https://x/r", "assets": [asset]}):
+            self.assertEqual(update.latest_release(), update.Release("1.8.0", "https://x/r", "https://x/BAW.exe"))
+        with fake({"tag_name": "v1.8.0", "assets": []}):  # build still running
+            self.assertIsNone(update.latest_release())
+
+    def test_install_copies_and_repoints_startup(self):
+        from baw import install
+
+        base = Path(tempfile.mkdtemp(dir=TMP))
+        source = write(base / "Downloads" / "BetterAchievementWatcher.exe", "new build")
+        with mock.patch.dict(os.environ, {"LOCALAPPDATA": str(base / "Local"), "APPDATA": str(base / "Roaming")}), \
+                mock.patch.object(install, "create_shortcut", return_value=True) as shortcut, \
+                mock.patch.object(install, "stop_running_instance") as stop, \
+                mock.patch.object(install.startup, "supported", return_value=True), \
+                mock.patch.object(install.startup, "is_enabled", return_value=True), \
+                mock.patch.object(install.startup, "set_enabled") as set_enabled:
+            write(install.installed_exe(), "old build")
+            target = install.install(source)
+            self.assertEqual(target, base / "Local" / "Programs" / "Better Achievement Watcher" / "BetterAchievementWatcher.exe")
+            self.assertEqual(target.read_text(encoding="utf-8"), "new build")
+            self.assertTrue(install.is_installed(target))
+            self.assertFalse(install.is_installed(source))
+            stop.assert_called_once()
+            shortcut.assert_called_once()
+            set_enabled.assert_called_once_with(True, exe=target)
+
+    def test_display_names(self):
+        from baw.scanner import display_name
+
+        for folder, shown in (("Tiny-Glade-AnkerGames", "Tiny Glade"), ("Hades.II.v1.0.2-RUNE", "Hades II"),
+                              ("Dying Light - Platinum Edition", "Dying Light - Platinum Edition"),
+                              ("R.E.P.O", "R.E.P.O"), ("Half-Life 2", "Half-Life 2"), ("GOG", "GOG")):
+            self.assertEqual(display_name(folder), shown)
