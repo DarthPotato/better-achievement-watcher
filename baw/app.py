@@ -71,6 +71,7 @@ class App:
 
     def run(self) -> None:
         self._start_instance_server()
+        startup.repair()
         threading.Thread(target=self._worker, name="worker", daemon=True).start()
         self.watcher.start()
         self.root.after(100, self._drain_ui_queue)

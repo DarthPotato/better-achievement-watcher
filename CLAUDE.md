@@ -54,10 +54,15 @@ Verified with real data: keyless Steam schema lookups, Goldberg/CODEX/RUNE parsi
 live unlock → popup path (on Linux/Xvfb), the Xbox emulator file format (from a real
 sample), the exe build.
 
-Never run on a real Windows machine yet:
-- the popup's no-focus/click-through behaviour over a game
-- the owned-Steam `UserGameStats` reader (its format is inferred; no public docs)
-- the Steam sound path
-- fixed-drive detection
-- Start with Windows
-- the release-attach step
+Verified on a real Windows 10 PC (2026-11):
+- popup over a borderless fullscreen window: the game window gets no WM_ACTIVATE /
+  WM_ACTIVATEAPP / WM_KILLFOCUS, the foreground window never changes, and a click on the
+  popup lands in the game (tested with a ctypes "fake game" that logs those messages)
+- owned-Steam `UserGameStats` reader: same unlocked achievements and identical unlock
+  times as the public Steam profile (Muse Dash, Project Redux)
+- Steam sound: `deck_ui_achievement_toast.wav` is 16-bit PCM and plays via winsound
+- fixed-drive detection (`C:\Games`, `C:\GOG Games`)
+- Start with Windows: the Run-key command starts the exe hidden from `System32` as cwd;
+  toggling writes/removes the value
+
+Not yet verified: the release-attach step.

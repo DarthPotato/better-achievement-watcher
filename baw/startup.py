@@ -46,3 +46,28 @@ def set_enabled(enabled: bool) -> None:
                 winreg.DeleteValue(key, VALUE_NAME)
             except OSError:
                 pass
+
+
+def _registered_command() -> str:
+    import winreg
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
+            return str(winreg.QueryValueEx(key, VALUE_NAME)[0])
+    except OSError:
+        return ""
+
+
+def repair() -> None:
+    """Keep 'Start with Windows' working after the exe was moved or re-downloaded elsewhere."""
+    if not supported() or not getattr(sys, "frozen", False):
+        return
+    registered = _registered_command()
+    if not registered:
+        return
+    target = registered[1:].split('"', 1)[0] if registered.startswith('"') else registered.split(" ", 1)[0]
+    if not Path(target).exists():
+        try:
+            set_enabled(True)
+        except OSError:
+            pass
