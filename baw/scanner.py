@@ -184,6 +184,32 @@ def _local_save_dirs(dll_dir: Path) -> List[Path]:
     return result
 
 
+# Uploader / release-group tags often appended to folder names ("Tiny-Glade-AnkerGames").
+RELEASE_TAGS = {
+    "ankergames", "fitgirl", "dodi", "elamigos", "codex", "rune", "empress", "tenoke", "plaza", "skidrow",
+    "reloaded", "razor1911", "flt", "darksiders", "hoodlum", "prophet", "goldberg", "onlinefix", "steamrip",
+    "gog", "repack", "multi", "portable", "gamesdrive",
+}
+
+
+def display_name(folder: str) -> str:
+    """A folder name made presentable: "Tiny-Glade-AnkerGames" -> "Tiny Glade". Display only."""
+    name = folder.strip()
+    if " " not in name and any(c in name for c in "-_."):
+        name = re.sub(r"[-_]+", " ", name)
+        # Dots separate words in scene names (Hades.II), but not in versions (v1.0.2) or
+        # acronyms written with dots (R.E.P.O).
+        if any(len(part) > 1 and not part.isdigit() for part in re.split(r"[\s.]+", name) if part):
+            name = re.sub(r"(?<!\d)\.|\.(?!\d)", " ", name)
+    words = name.split()
+    while len(words) > 1 and (words[-1].lower().strip("[]()") in RELEASE_TAGS
+                              or re.fullmatch(r"(?i)multi\d+|v?\d+(\.\d+)+", words[-1])):
+        words.pop()
+    while len(words) > 1 and words[-1] in "-_":
+        words.pop()
+    return " ".join(words) or folder
+
+
 def _guess_game_name(dll_dir: Path, library: Path) -> str:
     """The top-level folder under the library is usually the game's name."""
     try:
@@ -211,7 +237,7 @@ def scan_game_folder(library: Path, max_depth: int = 8) -> List[GameDir]:
         if appid is None:
             continue
         schema = dll_dir / "steam_settings" / "achievements.json"
-        game = GameDir(appid, dll_dir, name, schema if schema.is_file() else None)
+        game = GameDir(appid, dll_dir, display_name(name), schema if schema.is_file() else None)
         for folder in _local_save_dirs(dll_dir):
             for save in _saves_in(folder, appid, "Local save"):
                 numeric = [p for p in save.path.relative_to(folder).parts[:-1] if p.isdigit()]
@@ -229,6 +255,7 @@ def scan_game_folder(library: Path, max_depth: int = 8) -> List[GameDir]:
         if title is None:
             continue
         name = _guess_game_name(path.parent, library)
+        name = display_name(name)
         game = GameDir(title, path.parent, name, saves=[SaveFile(title, path, xbox.SOURCE)])
         game.schema = xbox.build_schema(title, name, path)
         games[path] = game

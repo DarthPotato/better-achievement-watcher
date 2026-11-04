@@ -58,6 +58,12 @@ class Config:
     sound_file: str = ""
     # Closing the window keeps watching in the background (run the app again to reopen it).
     keep_running_on_close: bool = True
+    # Look for a newer release on GitHub at startup (exe builds only).
+    check_updates: bool = True
+    # Last release version a background popup was shown for, so it's announced only once.
+    update_notified: str = ""
+    # Offer once to move the exe to %LOCALAPPDATA%\Programs and add a Start menu shortcut.
+    offer_install: bool = True
 
     @classmethod
     def path(cls) -> Path:
