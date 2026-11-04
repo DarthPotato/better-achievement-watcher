@@ -525,3 +525,31 @@ class BorrowedAppIdTests(unittest.TestCase):
         self.assertEqual(store.borrowed_by(1934680, ["ach_win"]), "")  # saves prove it's the real game
         store.register_game_dir(1934680, "Age of Mythology Retold", None)
         self.assertEqual(store.borrowed_by(1934680, []), "")
+
+
+class NameAndFilterTests(unittest.TestCase):
+    def test_store_name_beats_steam_cache_name(self):
+        from baw import schema as schema_module
+
+        with_achievements = GameSchema(1599340, "", source="Steam")
+        with_achievements.achievements["A"] = with_achievements.info("A")
+        cache = GameSchema(1599340, "Lost Ark Test 1", dict(with_achievements.achievements), source="Steam cache")
+        config = Config()
+        with mock.patch.object(schema_module, "schema_from_keyless_api", return_value=with_achievements), \
+                mock.patch.object(schema_module, "schema_from_steam_cache", return_value=cache), \
+                mock.patch.object(schema_module, "game_name_from_store", return_value="Lost Ark"):
+            store = SchemaStore(config)
+            self.assertEqual(store.get(1599340).title, "Lost Ark")
+        # An old cache file holding the cache name gets the store name on the next lookup.
+        old = GameSchema(77, "Lost Ark Test 1", dict(with_achievements.achievements), source="Steam")
+        store._schemas[77] = GameSchema.from_json(old.to_json())
+        with mock.patch.object(schema_module, "game_name_from_store", return_value="Real Name"):
+            self.assertEqual(store.get(77).title, "Real Name")
+
+    def test_source_filters(self):
+        from baw.app import FILTERS
+
+        self.assertTrue(FILTERS["Steam"]({"Steam"}))
+        self.assertFalse(FILTERS["Steam"]({"RUNE"}))
+        self.assertTrue(FILTERS["Emulators & other"]({"RUNE", "Local save"}))
+        self.assertTrue(all(FILTERS["All games"](e) for e in ({"Steam"}, {"RUNE"})))

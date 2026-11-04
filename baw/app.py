@@ -19,7 +19,15 @@ from .locations import steam_install_dir
 from .notify import play_sound, steam_sound
 from .scanner import game_folder_list, save_roots
 from .schema import GameSchema, SchemaStore
+from .steam_local import STEAM_SOURCE
 from .watcher import GameProgress, Watcher
+
+# Viewer filter: label -> test on a game's save sources.
+FILTERS = {
+    "All games": lambda emulators: True,
+    "Steam": lambda emulators: STEAM_SOURCE in emulators,
+    "Emulators & other": lambda emulators: STEAM_SOURCE not in emulators,
+}
 
 INSTANCE_PORT = 47863
 BURST_LIMIT = 3  # individual popups per batch; the rest are summarised
@@ -148,13 +156,14 @@ class App:
 
     def _prepare_popups(self, appid: int, states: List[AchievementState]) -> None:
         schema = self.store.get(appid, [s.name for s in states])
+        game_title = self.store.borrowed_by(appid, [s.name for s in states]) or schema.title
         for state in states[:BURST_LIMIT]:
             info = schema.info(state.name)
             icon = self.store.icon_file(appid, info)
-            self.ui_queue.put(("popup", PopupSpec(schema.title, info.title, info.description, icon, info.percent)))
+            self.ui_queue.put(("popup", PopupSpec(game_title, info.title, info.description, icon, info.percent)))
         extra = len(states) - BURST_LIMIT
         if extra > 0:
-            self.ui_queue.put(("popup", PopupSpec(schema.title, f"+{extra} more achievements",
+            self.ui_queue.put(("popup", PopupSpec(game_title, f"+{extra} more achievements",
                                                   "Open Better Achievement Watcher to see them all.")))
         self.ui_queue.put(("refresh",))
 
@@ -204,6 +213,10 @@ class App:
         panes.pack(fill="both", expand=True, padx=8)
 
         left = ttk.Frame(panes)
+        self.filter = tk.StringVar(value="All games")
+        chooser = ttk.Combobox(left, textvariable=self.filter, values=list(FILTERS), state="readonly")
+        chooser.pack(side="top", fill="x", pady=(0, 4))
+        chooser.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
         self.game_tree = ttk.Treeview(left, columns=("progress",), show="tree headings", selectmode="browse")
         self.game_tree.heading("#0", text="Game")
         self.game_tree.heading("progress", text="Progress")
@@ -224,7 +237,8 @@ class App:
         self.game_title = ttk.Label(right, text="No game selected", font=("Segoe UI", 12, "bold"))
         self.game_title.pack(anchor="w")
         self.game_meta = ttk.Label(right, text="", foreground="#666")
-        self.game_meta.pack(anchor="w")
+        self.game_meta.pack(anchor="w", fill="x")
+        self.game_meta.bind("<Configure>", lambda e: self.game_meta.configure(wraplength=max(200, e.width - 4)))
         self.progress = ttk.Progressbar(right, maximum=100)
         self.progress.pack(fill="x", pady=(4, 6))
         holder = ttk.Frame(right)
@@ -260,7 +274,10 @@ class App:
     def refresh(self) -> None:
         self.games = {g.appid: g for g in self.watcher.snapshot()}
         hidden_count = sum(self._is_hidden(a) for a in self.games)
-        ordered = sorted((g for g in self.games.values() if self.show_hidden.get() or not self._is_hidden(g.appid)),
+        shown = FILTERS.get(self.filter.get(), FILTERS["All games"])
+        ordered = sorted((g for g in self.games.values()
+                          if (self.show_hidden.get() or not self._is_hidden(g.appid))
+                          and shown({s.emulator for s in g.sources})),
                          key=lambda g: (self._is_hidden(g.appid), -g.last_activity, g.appid))
         existing = set(self.game_tree.get_children())
         wanted = set()
@@ -273,7 +290,7 @@ class App:
             borrowed = self.store.borrowed_by(game.appid, game.achievements)
             title = borrowed or schema.title
             if borrowed:
-                values = ("-",)
+                values = (f"{len(game.unlocked)}/{len(game.achievements)}" if game.achievements else "-",)
             tags = ("hidden",) if self._is_hidden(game.appid) else ()
             if iid in existing:
                 self.game_tree.item(iid, text=title, values=values, tags=tags)
@@ -355,12 +372,11 @@ class App:
             return
         schema = self._schema(appid)
         borrowed = self.store.borrowed_by(appid, game.achievements)
+        borrowed_from = ""
         if borrowed:
-            self._clear_achievements()
-            self.game_title.configure(text=borrowed)
-            self.game_meta.configure(text=f"This copy runs under the AppID of another game ({schema.title}, AppID {appid}), "
-                                          f"so its achievements can't be tracked.")
-            return
+            # Only the save's own achievement names are known; the AppID's list belongs to another game.
+            borrowed_from = schema.title
+            schema = GameSchema(appid, borrowed, source="save file")
         names = list(schema.achievements) + [n for n in game.achievements if n not in schema.achievements]
         unlocked = [n for n in names if n in game.achievements and game.achievements[n].unlocked]
         locked = [n for n in names if n not in unlocked]
@@ -370,6 +386,11 @@ class App:
         emulators = sorted({s.emulator for s in game.sources})
         self.game_meta.configure(text=f"AppID {appid}  •  {len(unlocked)} of {total} unlocked  •  "
                                       f"{', '.join(emulators)}  •  names from {schema.source or 'save file'}")
+        if borrowed_from:
+            recorded = (f"{len(unlocked)} of {total} achievements recorded in the save are shown by their raw names."
+                        if total else "Its save hasn't recorded any achievements.")
+            self.game_meta.configure(text=f"Runs under the AppID of {borrowed_from} ({appid}), so names and icons "
+                                          f"aren't available. {recorded}")
         self.progress.configure(value=100 * len(unlocked) / total if total else 0)
         self.ach_tree.delete(*self.ach_tree.get_children())
         for name in unlocked + locked:

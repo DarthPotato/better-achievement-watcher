@@ -30,9 +30,12 @@ def cmd_scan(config: Config, offline: bool) -> int:
         schema = store.get(game.appid)
         borrowed = store.borrowed_by(game.appid, game.achievements)
         if borrowed:
-            print(f"\n{borrowed} (AppID {game.appid}) - uses the AppID of {schema.title}, achievements can't be tracked")
+            print(f"\n{borrowed} (AppID {game.appid}) - runs under the AppID of {schema.title}; "
+                  f"{len(game.unlocked)}/{len(game.achievements)} recorded in the save (raw names)")
             for source in game.sources:
                 print(f"  file: {source.path}  [{source.emulator}]")
+            for state in game.unlocked:
+                print(f"  [x] {state.name}")
             continue
         total = len(schema.achievements) or len(game.achievements)
         hidden = "  [hidden in viewer]" if game.appid in config.hidden_games else ""
