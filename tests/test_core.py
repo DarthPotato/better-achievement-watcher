@@ -500,3 +500,28 @@ class HideGameTests(unittest.TestCase):
             self.assertEqual(app.config.hidden_games, [])
         finally:
             app.root.destroy()
+
+
+class BorrowedAppIdTests(unittest.TestCase):
+    def test_names_match(self):
+        from baw.schema import names_match
+
+        for steam, folder in (("Dying Light", "Dying Light - Platinum Edition"), ("Tiny Glade", "TinyGlade"),
+                              ("Kingdom Come: Deliverance II", "KCD2"), ("Wizard with a Gun", "WWAG"),
+                              ("Cyberpunk 2077", "CP2077"), ("Total War: SHOGUN 2", "Shogun2"), ("11001", "Whatever")):
+            self.assertTrue(names_match(steam, folder), (steam, folder))
+        for steam, folder in (("Age of Mythology: Retold", "Tiny-Glade-AnkerGames"), ("Portal 2", "Half-Life 2")):
+            self.assertFalse(names_match(steam, folder), (steam, folder))
+
+    def test_borrowed_by(self):
+        config = Config()
+        store = SchemaStore(config, offline=True)
+        schema = GameSchema(1934680, "Age of Mythology: Retold", source="test")
+        schema.achievements["ACH_WIN"] = schema.info("ACH_WIN")
+        store._schemas[1934680] = schema
+        self.assertEqual(store.borrowed_by(1934680, []), "")  # not found in a game folder
+        store.register_game_dir(1934680, "Tiny-Glade-AnkerGames", None)
+        self.assertEqual(store.borrowed_by(1934680, []), "Tiny-Glade-AnkerGames")
+        self.assertEqual(store.borrowed_by(1934680, ["ach_win"]), "")  # saves prove it's the real game
+        store.register_game_dir(1934680, "Age of Mythology Retold", None)
+        self.assertEqual(store.borrowed_by(1934680, []), "")

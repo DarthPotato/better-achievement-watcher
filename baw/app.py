@@ -270,12 +270,16 @@ class App:
             iid = str(game.appid)
             wanted.add(iid)
             values = (f"{len(game.unlocked)}/{total}",)
+            borrowed = self.store.borrowed_by(game.appid, game.achievements)
+            title = borrowed or schema.title
+            if borrowed:
+                values = ("-",)
             tags = ("hidden",) if self._is_hidden(game.appid) else ()
             if iid in existing:
-                self.game_tree.item(iid, text=schema.title, values=values, tags=tags)
+                self.game_tree.item(iid, text=title, values=values, tags=tags)
                 self.game_tree.move(iid, "", index)
             else:
-                self.game_tree.insert("", index, iid=iid, text=schema.title, values=values, tags=tags)
+                self.game_tree.insert("", index, iid=iid, text=title, values=values, tags=tags)
         for iid in existing - wanted:
             self.game_tree.delete(iid)
         files = sum(len(g.sources) for g in self.games.values())
@@ -350,6 +354,13 @@ class App:
         if game is None:
             return
         schema = self._schema(appid)
+        borrowed = self.store.borrowed_by(appid, game.achievements)
+        if borrowed:
+            self._clear_achievements()
+            self.game_title.configure(text=borrowed)
+            self.game_meta.configure(text=f"This copy runs under the AppID of another game ({schema.title}, AppID {appid}), "
+                                          f"so its achievements can't be tracked.")
+            return
         names = list(schema.achievements) + [n for n in game.achievements if n not in schema.achievements]
         unlocked = [n for n in names if n in game.achievements and game.achievements[n].unlocked]
         locked = [n for n in names if n not in unlocked]

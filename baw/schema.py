@@ -275,6 +275,40 @@ def game_name_from_store(appid: int) -> str:
     return ""
 
 
+# ---------------------------------------------------------------- borrowed AppIDs
+
+_FILLER = {"the", "of", "a", "an", "and", "edition", "goty", "game", "year", "deluxe", "definitive",
+           "complete", "ultimate", "platinum", "gold", "remastered", "digital", "collection", "directors",
+           "cut", "enhanced", "anniversary", "bundle", "repack", "win", "x64", "steam"}
+_ROMAN = {"ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii": "7", "viii": "8", "ix": "9"}
+
+
+def _words(text: str) -> list:
+    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)  # TinyGlade -> Tiny Glade
+    return [_ROMAN.get(w, w) for w in re.findall(r"[a-z0-9]+", text.lower())]
+
+
+def names_match(steam_name: str, folder_name: str) -> bool:
+    """Could a game folder called folder_name be the Steam game steam_name? Errs towards yes."""
+    steam, folder = _words(steam_name), _words(folder_name)
+    significant = {w for w in steam if len(w) >= 3 and w not in _FILLER and not w.isdigit()}
+    if not significant or not folder:
+        return True  # nothing to go on
+    if significant & set(folder):
+        return True
+    compact = "".join(folder)
+    if "".join(steam) in compact or compact in "".join(steam):
+        return True
+    # Abbreviated folders: "KCD2" for "Kingdom Come: Deliverance II".
+    for skip in ((), ("the", "of", "a")):
+        initials = "".join(w if w.isdigit() else w[0] for w in steam if w not in skip)
+        if len(initials) >= 2 and any(w.startswith(initials) or initials.startswith(w) for w in folder if len(w) >= 2):
+            return True
+    # "CP2077" for "Cyberpunk 2077": same number, same first letter.
+    numbers = {w for w in steam if w.isdigit()}
+    return any(w[0] == steam[0][0] and numbers & set(re.findall(r"\d+", w)) for w in folder)
+
+
 # ---------------------------------------------------------------- store
 
 class SchemaStore:
@@ -290,6 +324,7 @@ class SchemaStore:
         self._failed: Dict[int, float] = {}
         self._local_schema: Dict[int, Path] = {}
         self._local_names: Dict[int, str] = {}
+        self._folder_names: Dict[int, set] = {}
         self._fixed: Dict[int, GameSchema] = {}  # games with their own achievement list (Xbox)
         self._lock = threading.RLock()
         self._steam_dir = steam_install_dir()
@@ -297,6 +332,7 @@ class SchemaStore:
     def register_game_dir(self, appid: int, name: str, schema_file: Optional[Path]) -> None:
         with self._lock:
             self._local_names.setdefault(appid, name)
+            self._folder_names.setdefault(appid, set()).add(name)
             if schema_file:
                 self._local_schema[appid] = schema_file
 
@@ -304,6 +340,26 @@ class SchemaStore:
         """A schema that comes with the game itself and must not be looked up on Steam."""
         with self._lock:
             self._fixed[schema.appid] = schema
+
+    def borrowed_by(self, appid: int, saved_names: Iterable[str]) -> str:
+        """The game folder's name when a game runs under another game's AppID, else "".
+
+        Some releases reuse the AppID of an unrelated game (Tiny Glade as Age of Mythology),
+        and their achievements then can't be tracked. Saved achievement names that exist in
+        that AppID's list prove the AppID is the game's own."""
+        with self._lock:
+            folders = sorted(self._folder_names.get(appid, ()))
+            if not folders or appid in self._fixed:
+                return ""
+        schema = self.cached(appid)
+        if schema is None or not schema.name or not schema.achievements:
+            return ""
+        known = {n.lower() for n in schema.achievements}
+        if any(n.lower() in known for n in saved_names):
+            return ""
+        if any(names_match(schema.name, folder) for folder in folders):
+            return ""
+        return folders[0]
 
     def icon_cache_path(self, appid: int, url: str) -> Path:
         name = Path(urllib.parse.urlparse(url).path).name
