@@ -39,6 +39,8 @@ class Config:
     # Show achievements of games you own on Steam (read from Steam's local cache).
     # These never pop up - Steam already shows its own notification for them.
     include_steam_library: bool = True
+    # Also list Steam games that aren't installed any more but have unlocked achievements.
+    include_uninstalled_steam: bool = False
     # AppIDs hidden from the viewer (e.g. saves left behind by uninstalled games).
     # Hiding is cosmetic: hidden games still get popups.
     hidden_games: List[int] = field(default_factory=list)

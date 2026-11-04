@@ -448,6 +448,7 @@ class SettingsDialog:
         self.autostart = tk.BooleanVar(value=startup.is_enabled())
         self.common = tk.BooleanVar(value=cfg.scan_common_game_folders)
         self.steam_library = tk.BooleanVar(value=cfg.include_steam_library)
+        self.steam_uninstalled = tk.BooleanVar(value=cfg.include_uninstalled_steam)
         self.sound_file = cfg.sound_file
         self.sound_choice = tk.StringVar(value=self._sound_label(cfg.sound_style, cfg.sound_file))
         rows = [
@@ -468,6 +469,8 @@ class SettingsDialog:
         ttk.Checkbutton(body, text="Also search Games / GOG Games folders on every drive", variable=self.common).pack(anchor="w")
         ttk.Checkbutton(body, text="Show games you own on Steam (no popups for these - Steam shows its own)",
                         variable=self.steam_library).pack(anchor="w")
+        ttk.Checkbutton(body, text="    ...including uninstalled games you unlocked achievements in",
+                        variable=self.steam_uninstalled).pack(anchor="w")
         ttk.Checkbutton(body, text="Keep watching when the window is closed", variable=self.keep).pack(anchor="w")
         if startup.supported():
             ttk.Checkbutton(body, text="Start with Windows (in the background)", variable=self.autostart).pack(anchor="w")
@@ -570,6 +573,7 @@ class SettingsDialog:
         cfg.keep_running_on_close = self.keep.get()
         cfg.scan_common_game_folders = self.common.get()
         cfg.include_steam_library = self.steam_library.get()
+        cfg.include_uninstalled_steam = self.steam_uninstalled.get()
         for key, value in self._sound_settings().items():
             setattr(cfg, key, value)
         cfg.save()

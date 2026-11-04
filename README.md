@@ -55,8 +55,9 @@ Click **Test popup** to confirm popups show up, then just play. In **Settings**:
   along with the `steam_settings` achievement list.
 * **Show games you own on Steam**: also lists the achievements of your real Steam
   games, read from Steam's local cache. These never pop up, since Steam already shows
-  its own popup for them. Steam caches stats for every game page you open, so only games
-  that are installed or have at least one unlock are listed.
+  its own popup for them. Steam caches stats for every game page you open, so only
+  installed games are listed. Tick *...including uninstalled games* to also list games
+  you played and uninstalled.
 * **Sound**: Steam's own achievement sound, played straight from your Steam install
   (`steamui\sounds\deck_ui_achievement_toast.wav`; it isn't bundled with this app).
   If Steam isn't installed it uses a built-in chime. You can also pick any `.wav`.

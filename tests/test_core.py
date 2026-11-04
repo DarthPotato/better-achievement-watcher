@@ -284,11 +284,12 @@ class MoreDetectionTests(unittest.TestCase):
 
         base = Path(tempfile.mkdtemp(dir=TMP))
         path = write(base / "UserGameStats_1_5.bin", "")
-        config = Config(scan_default_locations=False)
+        config = Config(scan_default_locations=False, include_steam_library=False, scan_common_game_folders=False)
         events = []
         w = Watcher(config, SchemaStore(config, offline=True), on_unlock=lambda a, s: events.append(a))
         states = [{}, {"X": watcher_module.AchievementState("X", True)}]
         with mock.patch.object(watcher_module, "parse_steam_stats", side_effect=lambda p: states[0]):
+            w._steam_installed = {5}
             w._files[path] = watcher_module.TrackedFile(SaveFile(5, path, "Steam"))
             w.poll()
             states.pop(0)
@@ -440,7 +441,7 @@ class StartupTests(unittest.TestCase):
 
 
 class SteamListingTests(unittest.TestCase):
-    def test_only_installed_or_played_steam_games_listed(self):
+    def test_only_installed_steam_games_listed(self):
         from baw import watcher as watcher_module
         from baw.scanner import SaveFile
         from baw.steam_local import installed_appids
@@ -461,7 +462,9 @@ class SteamListingTests(unittest.TestCase):
         for appid, states in ((1, locked), (2, {}), (3, locked), (4, played)):
             path = Path(f"UserGameStats_9_{appid}.bin")
             w._files[path] = watcher_module.TrackedFile(SaveFile(appid, path, "Steam"), states=states)
-        # 1: installed, 2: installed but no achievements, 3: only looked at, 4: played
+        # 1: installed, 2: installed but no achievements, 3: only looked at, 4: played, uninstalled
+        self.assertEqual(sorted(g.appid for g in w.snapshot()), [1])
+        config.include_uninstalled_steam = True
         self.assertEqual(sorted(g.appid for g in w.snapshot()), [1, 4])
 
 
