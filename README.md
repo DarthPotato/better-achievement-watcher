@@ -84,7 +84,7 @@ Closing the window keeps the app watching. Use **Quit** to stop it.
 | SKIDROW | `%LOCALAPPDATA%\SKIDROW\<AppID>\`, `Documents\SKIDROW\<AppID>\` |
 | Reloaded / 3DM | `%PROGRAMDATA%\Steam\<user>\<AppID>\stats\achievements.ini` |
 | Local saves | Anything under a game folder, next to `steam_api(64).dll` |
-| Games with their own achievement save | ReStory: `%USERPROFILE%\AppData\LocalLow\Mandragora\Restory\SaveDatachievements.slot*.restory` |
+| Games with their own achievement save | ReStory: `%USERPROFILE%\AppData\LocalLow\Mandragora\Restory\SaveData\achievements.slot*.restory` |
 | Steam (owned games) | `Steam\appcache\stats\UserGameStats_<account>_<AppID>.bin` (viewer only) |
 | Anything else | Add it under **Extra save folders**, laid out as `<folder>\<AppID>\...` |
 
