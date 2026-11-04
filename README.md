@@ -34,10 +34,17 @@ python BetterAchievementWatcher.pyw
 
 Click **Test popup** to confirm popups show up, then just play. In **Settings**:
 
-* **Game folders**: add the folder your games are installed in (for example
-  `D:\Games`). The app finds each game's `steam_api(64).dll`, reads its AppID, and
-  picks up saves stored next to the game ("local save" setups) along with the
-  `steam_settings` achievement list.
+* **Game folders**: `Games` and `GOG Games` on every local drive (plus GOG Galaxy's
+  Games folder) are searched automatically; add any other folder here. In each one, the
+  app finds every game's `steam_api(64).dll`, reads its AppID, and picks up saves
+  stored next to the game ("local save" setups, including a custom `local_save_path`),
+  along with the `steam_settings` achievement list.
+* **Show games you own on Steam**: also lists the achievements of your real Steam
+  games, read from Steam's local cache. These never pop up, since Steam already shows
+  its own popup for them.
+* **Sound**: Steam's own achievement sound, played straight from your Steam install
+  (`steamui\sounds\deck_ui_achievement_toast.wav`; it isn't bundled with this app).
+  If Steam isn't installed it uses a built-in chime. You can also pick any `.wav`.
 * **Start with Windows**: runs it hidden in the background at login. Popups still show,
   and launching the app again opens the window.
 * Language, popup corner, size, duration, and sound.
@@ -57,7 +64,8 @@ Closing the window keeps the app watching. Use **Quit** to stop it.
 | CreamAPI | `%APPDATA%\CreamAPI\<AppID>\stats\CreamAPI.Achievements.cfg` |
 | SKIDROW | `%LOCALAPPDATA%\SKIDROW\<AppID>\`, `Documents\SKIDROW\<AppID>\` |
 | Reloaded / 3DM | `%PROGRAMDATA%\Steam\<user>\<AppID>\stats\achievements.ini` |
-| Local saves | Anything under a configured game folder, next to `steam_api(64).dll` |
+| Local saves | Anything under a game folder, next to `steam_api(64).dll` |
+| Steam (owned games) | `Steam\appcache\stats\UserGameStats_<account>_<AppID>.bin` (viewer only) |
 | Anything else | Add it under **Extra save folders**, laid out as `<folder>\<AppID>\...` |
 
 The parser isn't tied to one crack group. It reads the JSON and INI dialects generically:
@@ -68,6 +76,11 @@ usually works once you point an extra folder at it.
 Not supported: SmartSteamEmu's binary `stats.bin`, and games whose emulator doesn't save
 achievements to disk at all. Some cracks ship without achievement support; there is
 nothing to watch for those.
+
+GOG games aren't covered: they don't use Steam's achievement system. Offline GOG
+installs don't record achievements anywhere, and games played through GOG Galaxy keep
+them in Galaxy's own database, which isn't read. A GOG game only shows up if it was set
+up with a Steam emulator.
 
 ## Troubleshooting
 

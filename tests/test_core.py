@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import struct
@@ -231,3 +232,78 @@ class SchemaTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MoreDetectionTests(unittest.TestCase):
+    def test_unreal_layout_appid_next_to_exe(self):
+        lib = Path(tempfile.mkdtemp(dir=TMP))
+        root = lib / "Big Game"
+        dll = root / "Engine/Binaries/ThirdParty/Steamworks/Steamv157/Win64"
+        write(dll / "steam_api64.dll", "")
+        write(root / "BigGame/Binaries/Win64/steam_appid.txt", "1234\n")
+        write(dll / "steam_settings/achievements.json", [{"name": "A"}])
+        games = scan_game_folder(lib)
+        self.assertEqual([(g.appid, g.name) for g in games], [(1234, "Big Game")])
+
+    def test_local_save_path_outside_game(self):
+        lib = Path(tempfile.mkdtemp(dir=TMP))
+        elsewhere = Path(tempfile.mkdtemp(dir=TMP))
+        write(lib / "G" / "steam_api64.dll", "")
+        write(lib / "G" / "steam_appid.txt", "77")
+        write(lib / "G" / "steam_settings" / "configs.user.ini", f"[user::saves]\nlocal_save_path={elsewhere}\n")
+        write(elsewhere / "77" / "achievements.json", {"A": {"earned": True}})
+        saves = scan_game_folder(lib)[0].saves
+        self.assertEqual([(s.appid, s.path.parent.name) for s in saves], [(77, "77")])
+
+    def test_owned_steam_game_stats(self):
+        from baw.steam_local import parse_steam_stats, stats_files
+
+        steam = Path(tempfile.mkdtemp(dir=TMP))
+        stats = steam / "appcache" / "stats"
+        stats.mkdir(parents=True)
+        schema = {"620": {"gamename": "Portal 2", "stats": {"1": {"type": 4, "bits": {
+            "0": {"name": "ACH_A", "bit": 0, "display": {"name": {"english": "A"}}},
+            "1": {"name": "ACH_B", "bit": 1, "display": {"name": {"english": "B"}}},
+            "2": {"name": "ACH_C", "bit": 2, "display": {"name": {"english": "C"}}},
+        }}}}}
+        (stats / "UserGameStatsSchema_620.bin").write_bytes(kv_map(schema) + b"\x08")
+        user = {"cache": {"crc": 1, "PendingChanges": 0, "1": {"data": 0b101, "AchievementTimes": {"0": 1700000000, "2": 1700000500}}}}
+        (stats / "UserGameStats_11111_620.bin").write_bytes(kv_map(user) + b"\x08")
+        (stats / "UserGameStats_22222_620.bin").write_bytes(b"\x08")
+        os.utime(stats / "UserGameStats_22222_620.bin", (1, 1))  # older account
+        files = stats_files(steam)
+        self.assertEqual([(a, p.name) for a, p in files], [(620, "UserGameStats_11111_620.bin")])
+        states = parse_steam_stats(files[0][1])
+        self.assertEqual(unlocked(states), {"ACH_A", "ACH_C"})
+        self.assertEqual(states["ACH_C"].unlock_time, 1700000500)
+
+    def test_owned_steam_games_never_pop_up(self):
+        from baw import watcher as watcher_module
+        from baw.scanner import SaveFile
+
+        base = Path(tempfile.mkdtemp(dir=TMP))
+        path = write(base / "UserGameStats_1_5.bin", "")
+        config = Config(scan_default_locations=False)
+        events = []
+        w = Watcher(config, SchemaStore(config, offline=True), on_unlock=lambda a, s: events.append(a))
+        states = [{}, {"X": watcher_module.AchievementState("X", True)}]
+        with mock.patch.object(watcher_module, "parse_steam_stats", side_effect=lambda p: states[0]):
+            w._files[path] = watcher_module.TrackedFile(SaveFile(5, path, "Steam"))
+            w.poll()
+            states.pop(0)
+            os.utime(path, (time.time() + 9, time.time() + 9))
+            w.poll()
+        self.assertEqual(events, [])
+        self.assertEqual(len(w.snapshot()[0].unlocked), 1)
+
+    @unittest.skipUnless(importlib.util.find_spec("tkinter"), "needs Tk")
+    def test_sound_falls_back_to_chime_without_steam(self):
+        from baw import notify
+
+        with mock.patch.object(notify, "steam_install_dir", return_value=None):
+            self.assertEqual(notify.sound_path(Config()).name, "chime.wav")
+        steam = Path(tempfile.mkdtemp(dir=TMP))
+        write(steam / "steamui/sounds/deck_ui_achievement_toast.wav", "RIFF")
+        with mock.patch.object(notify, "steam_install_dir", return_value=steam):
+            self.assertEqual(notify.sound_path(Config()).name, "deck_ui_achievement_toast.wav")
+            self.assertEqual(notify.sound_path(Config(sound_style="chime")).name, "chime.wav")

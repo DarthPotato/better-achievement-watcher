@@ -33,6 +33,12 @@ class Config:
     # Game install / library folders. Searched for steam_api(64).dll so that games which
     # save next to the exe ("local_save") and ship steam_settings/achievements.json are found.
     game_folders: List[str] = field(default_factory=list)
+    # Also search the usual places games get installed on every fixed drive
+    # (X:\Games, X:\GOG Games, GOG Galaxy's Games folder).
+    scan_common_game_folders: bool = True
+    # Show achievements of games you own on Steam (read from Steam's local cache).
+    # These never pop up - Steam already shows its own notification for them.
+    include_steam_library: bool = True
     # Seconds between checks of the save files.
     poll_interval: float = 1.5
     # Popup settings.
@@ -40,7 +46,10 @@ class Config:
     popup_position: str = "bottom-right"  # bottom-right | bottom-left | top-right | top-left
     popup_scale: float = 1.0
     sound: bool = True
-    # Optional custom .wav to play instead of the built-in chime.
+    # "steam": Steam's own achievement sound, taken from your Steam install
+    # (falls back to the chime if Steam isn't installed). "chime": the built-in sound.
+    sound_style: str = "steam"
+    # Optional custom .wav; overrides sound_style when set.
     sound_file: str = ""
     # Closing the window keeps watching in the background (run the app again to reopen it).
     keep_running_on_close: bool = True

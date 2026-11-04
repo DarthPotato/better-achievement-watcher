@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .config import Config, data_dir
+from .locations import steam_install_dir
 
 try:
     from PIL import Image, ImageTk
@@ -79,11 +80,31 @@ def _chime_path() -> Path:
     return path
 
 
+def steam_sound() -> Optional[Path]:
+    """Steam's own achievement sound, if Steam is installed. It isn't redistributed with
+    this app; it's played straight from your Steam folder."""
+    steam = steam_install_dir()
+    if steam is None:
+        return None
+    path = steam / "steamui" / "sounds" / "deck_ui_achievement_toast.wav"
+    return path if path.is_file() else None
+
+
+def sound_path(config: Config) -> Path:
+    if config.sound_file and Path(config.sound_file).is_file():
+        return Path(config.sound_file)
+    if config.sound_style == "steam":
+        steam = steam_sound()
+        if steam:
+            return steam
+    return _chime_path()
+
+
 def play_sound(config: Config) -> None:
     if not config.sound:
         return
     try:
-        sound = Path(config.sound_file) if config.sound_file else _chime_path()
+        sound = sound_path(config)
         if sys.platform == "win32":
             import winsound
 

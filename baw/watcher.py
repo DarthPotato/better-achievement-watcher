@@ -10,6 +10,7 @@ from typing import Callable, Dict, List, Optional, Set, Tuple
 from .config import Config
 from .parsers import AchievementState, parse_file
 from .scanner import SaveFile, scan_game_folders, scan_save_roots
+from .steam_local import STEAM_SOURCE, parse_steam_stats
 from .schema import SchemaStore
 
 REDISCOVER_EVERY = 10.0  # seconds between looks for new save folders
@@ -92,10 +93,12 @@ class Watcher:
             by_app: Dict[int, List[TrackedFile]] = {}
             for tracked in self._files.values():
                 by_app.setdefault(tracked.save.appid, []).append(tracked)
-            return [
-                GameProgress(appid, merge([t.states for t in tracked]), [t.save for t in tracked])
-                for appid, tracked in by_app.items()
-            ]
+            games = []
+            for appid, tracked in by_app.items():
+                merged = merge([t.states for t in tracked])
+                if merged:  # skip files that turned out to hold no achievements
+                    games.append(GameProgress(appid, merged, [t.save for t in tracked if t.states]))
+            return games
 
     # ------------------------------------------------------------ discovery
 
@@ -129,14 +132,18 @@ class Watcher:
         signature = _signature(tracked.save.path)
         if signature is None or signature == tracked.signature:
             return False
-        states = parse_file(tracked.save.path)
+        if tracked.save.emulator == STEAM_SOURCE:
+            states = parse_steam_stats(tracked.save.path)
+        else:
+            states = parse_file(tracked.save.path)
         if states is None:
             # Probably caught the emulator mid-write: retry on the next poll. A file that
             # stays unreadable (unsupported binary format) is only re-read once it changes.
             if time.time() - signature[0] > 2:
                 tracked.signature = signature
             return False
-        notify = notify and not tracked.quiet
+        # Steam already announces achievements of games you own.
+        notify = notify and not tracked.quiet and tracked.save.emulator != STEAM_SOURCE
         tracked.quiet = False
         appid = tracked.save.appid
         with self._lock:

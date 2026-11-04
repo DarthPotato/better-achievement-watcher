@@ -40,16 +40,27 @@ def cmd_scan(config: Config, offline: bool) -> int:
 
 
 def cmd_doctor(config: Config) -> int:
-    from .scanner import save_roots, scan_game_folders, scan_root
+    from .locations import steam_install_dir
+    from .notify import sound_path
+    from .scanner import game_folder_list, save_roots, scan_game_folders, scan_root
+    from .steam_local import stats_files
 
     print(f"{APP_NAME} {__version__}\nConfig: {config.path()}\n\nSave locations:")
     for root in save_roots(config):
         exists = root.path.is_dir()
         count = len(scan_root(root)) if exists else 0
         print(f"  [{'found' if exists else '  -  '}] {root.emulator:<16} {root.path}" + (f"  ({count} save files)" if exists else ""))
+    steam = steam_install_dir()
+    print(f"\nSteam: {steam or 'not found'}")
+    if steam and config.include_steam_library:
+        print(f"  {len(stats_files(steam))} owned games with cached achievement stats")
+    print(f"Popup sound: {sound_path(config)}")
     print("\nGame folders:")
-    if not config.game_folders:
-        print("  (none configured - add your games folder in Settings to catch local saves)")
+    for folder in game_folder_list(config):
+        print(f"  {folder}")
+    if not game_folder_list(config):
+        print("  (none found - add your games folder in Settings to catch local saves)")
+    print("\nGames found in game folders:")
     for game in scan_game_folders(config):
         print(f"  AppID {game.appid:<8} {game.name}  dll: {game.path}")
         print(f"      schema: {game.schema_file or '-'}  saves: {len(game.saves)}")
