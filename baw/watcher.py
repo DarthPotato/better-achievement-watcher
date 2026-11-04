@@ -96,8 +96,12 @@ class Watcher:
             games = []
             for appid, tracked in by_app.items():
                 merged = merge([t.states for t in tracked])
-                if merged:  # skip files that turned out to hold no achievements
-                    games.append(GameProgress(appid, merged, [t.save for t in tracked if t.states]))
+                # A file found by searching game folders may be an unrelated stats.ini, so only
+                # list it once it holds achievements. Emulator save folders always count: a
+                # game you haven't unlocked anything in yet still shows as 0/N.
+                sources = [t.save for t in tracked if t.states or t.save.emulator != "Local save"]
+                if merged or sources:
+                    games.append(GameProgress(appid, merged, sources or [t.save for t in tracked]))
             return games
 
     # ------------------------------------------------------------ discovery
@@ -106,6 +110,8 @@ class Watcher:
         saves: List[SaveFile] = []
         for game in scan_game_folders(self.config):
             self.store.register_game_dir(game.appid, game.name, game.schema_file)
+            if game.schema is not None:
+                self.store.register_fixed_schema(game.schema)
             saves.extend(game.saves)
         with self._lock:
             self._game_dir_saves = saves

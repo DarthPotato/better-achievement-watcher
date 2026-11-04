@@ -329,3 +329,51 @@ class EmulatorGroupTests(unittest.TestCase):
         game = scan_game_folder(lib)[0]
         self.assertEqual(game.appid, 239140)
         self.assertEqual([s.appid for s in game.saves], [239140])
+
+
+class XboxEmulatorTests(unittest.TestCase):
+    def test_1911_achievements_json(self):
+        lib = Path(tempfile.mkdtemp(dir=TMP))
+        items = [
+            {"id": "1", "name": "Thank you for playing!", "description": "Got all other achievements.",
+             "titleAssociations": [{"name": "Taiko no Tatsujin", "id": 1624264477}], "progressState": "InProgress",
+             "progression": {"requirements": [{"current": "2", "target": "100"}], "timeUnlocked": "0001-01-01T00:00:00.0000000Z"},
+             "mediaAssets": [{"type": "Icon", "url": "http://images-eds.xboxlive.com/image?url=abc"}], "isSecret": False},
+            {"id": "2", "name": "First Song", "description": "Play a song.",
+             "titleAssociations": [{"name": "Taiko no Tatsujin", "id": 1624264477}], "progressState": "Achieved",
+             "progression": {"requirements": [], "timeUnlocked": "2026-10-01T12:00:00.1234567Z"},
+             "mediaAssets": [{"type": "Icon", "url": "http://images-eds.xboxlive.com/image?url=def"}], "isSecret": True},
+        ]
+        path = write(lib / "Taiko no Tatsujin The Drum Master" / "1911" / "Achievements" / "Achievements.json",
+                     {"achievements": items})
+        states = parse_bytes(path.read_bytes())
+        self.assertEqual(unlocked(states), {"2"})
+        self.assertEqual(states["2"].unlock_time, 1790856000)  # 2026-10-01 12:00 UTC
+        self.assertEqual((states["1"].progress, states["1"].max_progress), (2, 100))
+
+        games = scan_game_folder(lib)
+        self.assertEqual([(g.appid, g.name) for g in games], [(1624264477, "Taiko no Tatsujin The Drum Master")])
+        schema = games[0].schema
+        self.assertEqual(schema.info("2").title, "First Song")
+        self.assertTrue(schema.info("2").icon.startswith("https://images-eds-ssl.xboxlive.com/"))
+
+        config = Config(scan_default_locations=False, include_steam_library=False, scan_common_game_folders=False,
+                        game_folders=[str(lib)])
+        store = SchemaStore(config, offline=True)
+        w = Watcher(config, store)
+        w.initial_scan()
+        game = w.snapshot()[0]
+        self.assertEqual(len(game.unlocked), 1)
+        self.assertEqual(store.get(1624264477).title, "Taiko no Tatsujin The Drum Master")
+        icon_a = store.icon_cache_path(1, schema.info("1").icon)
+        icon_b = store.icon_cache_path(1, schema.info("2").icon)
+        self.assertNotEqual(icon_a, icon_b)
+
+    def test_empty_emulator_save_still_listed(self):
+        base = Path(tempfile.mkdtemp(dir=TMP))
+        write(base / "239140" / "achievements.ini", "[SteamAchievements]\nCount=0\n")
+        config = Config(scan_default_locations=False, include_steam_library=False, scan_common_game_folders=False,
+                        extra_save_roots=[str(base)])
+        w = Watcher(config, SchemaStore(config, offline=True))
+        w.initial_scan()
+        self.assertEqual([(g.appid, len(g.unlocked)) for g in w.snapshot()], [(239140, 0)])
