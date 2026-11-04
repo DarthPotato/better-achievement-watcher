@@ -22,14 +22,15 @@ def cmd_scan(config: Config, offline: bool) -> int:
     store = SchemaStore(config, offline=offline)
     watcher = Watcher(config, store)
     watcher.initial_scan()
-    games = sorted(watcher.snapshot(), key=lambda g: -g.last_unlock)
+    games = sorted(watcher.snapshot(), key=lambda g: -g.last_activity)
     if not games:
         print("No achievement saves found. Run `doctor` to see which folders were checked.")
         return 1
     for game in games:
         schema = store.get(game.appid)
         total = len(schema.achievements) or len(game.achievements)
-        print(f"\n{schema.title} (AppID {game.appid}) - {len(game.unlocked)}/{total} unlocked")
+        hidden = "  [hidden in viewer]" if game.appid in config.hidden_games else ""
+        print(f"\n{schema.title} (AppID {game.appid}) - {len(game.unlocked)}/{total} unlocked{hidden}")
         for source in game.sources:
             print(f"  file: {source.path}  [{source.emulator}]")
         for state in sorted(game.unlocked, key=lambda s: -s.unlock_time):
@@ -58,7 +59,10 @@ def cmd_doctor(config: Config) -> int:
     steam = steam_install_dir()
     print(f"\nSteam: {steam or 'not found'}")
     if steam and config.include_steam_library:
-        print(f"  {len(stats_files(steam))} owned games with cached achievement stats")
+        from .steam_local import installed_appids
+
+        print(f"  {len(stats_files(steam))} games with cached achievement stats, "
+              f"{len(installed_appids(steam))} games installed (only installed or played ones are listed)")
     print(f"Popup sound: {sound_path(config)}")
     print("\nGame folders:")
     for folder in game_folder_list(config):

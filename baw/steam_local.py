@@ -7,6 +7,9 @@ Steam keeps two binary KeyValues files per game in ``Steam/appcache/stats``:
   bit field (bit set = unlocked) and ``AchievementTimes`` (bit -> unix time)
 
 This is shown in the viewer only. Steam shows its own popup for these games.
+
+Steam writes these files for any game whose library or achievement page you opened, owned
+or not, so only games that are installed or have at least one unlock are listed.
 """
 
 import re
@@ -96,3 +99,26 @@ def parse_steam_stats(path: Path) -> Optional[Dict[str, AchievementState]]:
                 when = 0
             result[name] = AchievementState(name, unlocked, when)
     return result
+
+
+def installed_appids(steam_dir: Optional[Path]) -> set:
+    """AppIDs installed in any Steam library (appmanifest_<appid>.acf)."""
+    if steam_dir is None:
+        return set()
+    libraries = [steam_dir]
+    try:
+        vdf = (steam_dir / "steamapps" / "libraryfolders.vdf").read_text(encoding="utf-8", errors="replace")
+        libraries += [Path(p.replace("\\\\", "\\")) for p in re.findall(r'"path"\s+"([^"]+)"', vdf)]
+    except OSError:
+        pass
+    found = set()
+    for library in libraries:
+        try:
+            names = (library / "steamapps").iterdir()
+            for path in names:
+                match = re.match(r"^appmanifest_(\d+)\.acf$", path.name, re.I)
+                if match:
+                    found.add(int(match.group(1)))
+        except OSError:
+            continue
+    return found

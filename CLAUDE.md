@@ -19,12 +19,12 @@ Web API key became mandatory), and its Windows toasts get swallowed by Focus Ass
 | Module | Job |
 | --- | --- |
 | `baw/__main__.py` | CLI: `gui` (default), `--background`, `scan`, `doctor`, `test-popup`, `--offline` |
-| `baw/app.py` | Tk main window, Settings dialog, worker thread, popup pipeline, single instance (localhost:47863) |
+| `baw/app.py` | Tk main window (right-click a game to hide it; `Config.hidden_games`), Settings dialog, worker thread, popup pipeline, single instance (localhost:47863) |
 | `baw/config.py` | `Config` dataclass ↔ `%APPDATA%\BetterAchievementWatcher\config.json` (`BAW_DATA_DIR` overrides it, used by tests) |
 | `baw/locations.py` | Emulator save roots (Goldberg, GSE, every `...\Steam\<group>` folder, EMPRESS, OnlineFix, CreamAPI, SKIDROW, Reloaded/3DM), common game folders on fixed drives, Steam install dir |
 | `baw/scanner.py` | Finds save files: AppID subfolders under the roots; in game folders, `steam_api(64).dll` → AppID detection (steam_appid.txt, ini `AppId=`, Unreal layouts), local saves, `local_save_path` / ini `Save*=` paths, Xbox `Achievements.json` |
 | `baw/parsers.py` | Generic save parser: JSON (Goldberg/GSE/EMPRESS, Xbox `progressState`), INI per-achievement sections, flat sections, 3DM/RLD hex little-endian values, UTF-16 |
-| `baw/steam_local.py` | Owned Steam games from `Steam\appcache\stats\UserGameStats_<account>_<appid>.bin`. Viewer only: never pops up |
+| `baw/steam_local.py` | Owned Steam games from `Steam\appcache\stats\UserGameStats_<account>_<appid>.bin`. Viewer only: never pops up. Steam caches stats for any game page you opened, so only installed (`appmanifest_*.acf` in any library) or played games are listed |
 | `baw/native.py` | Games that store achievements in their own save format instead of through an emulator (ReStory: gzip'd JSON in `LocalLow\Mandragora`). One table entry per game: folder, file pattern, parser, AppID |
 | `baw/xbox.py` | 1911 Xbox emulator `Achievements.json`: title id as the game id, schema read from the file itself |
 | `baw/schema.py` | Achievement names/icons/rarity. Order: keyless `IPlayerService/GetGameAchievements` → Web API (optional key) → `steam_settings/achievements.json` → Steam's `UserGameStatsSchema_*.bin`. Binary KeyValues parser, disk cache, icon cache |

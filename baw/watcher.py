@@ -11,7 +11,8 @@ from .config import Config
 from . import native
 from .parsers import AchievementState, parse_file
 from .scanner import SaveFile, scan_game_folders, scan_save_roots
-from .steam_local import STEAM_SOURCE, parse_steam_stats
+from .steam_local import STEAM_SOURCE, installed_appids, parse_steam_stats
+from .locations import steam_install_dir
 from .schema import SchemaStore
 
 REDISCOVER_EVERY = 10.0  # seconds between looks for new save folders
@@ -40,6 +41,19 @@ class GameProgress:
     @property
     def last_unlock(self) -> int:
         return max((a.unlock_time for a in self.unlocked), default=0)
+
+    @property
+    def last_activity(self) -> float:
+        """For sorting: the latest unlock time, or the save's modified time when unlocks
+        carry no timestamps (e.g. ReStory)."""
+        if self.last_unlock or not self.unlocked:
+            return float(self.last_unlock)
+        times = []
+        for source in self.sources:
+            signature = _signature(source.path)
+            if signature:
+                times.append(signature[0])
+        return max(times, default=0.0)
 
 
 UnlockCallback = Callable[[int, List[AchievementState]], None]
@@ -82,6 +96,7 @@ class Watcher:
         self._game_dir_saves: List[SaveFile] = []
         self._last_rediscover = 0.0
         self._last_game_scan = 0.0
+        self._steam_installed: Set[int] = set()
 
     # ------------------------------------------------------------ state
 
@@ -96,6 +111,9 @@ class Watcher:
                 by_app.setdefault(tracked.save.appid, []).append(tracked)
             games = []
             for appid, tracked in by_app.items():
+                tracked = [t for t in tracked if self._listed(t)]
+                if not tracked:
+                    continue
                 merged = merge([t.states for t in tracked])
                 # A file found by searching game folders may be an unrelated stats.ini, so only
                 # list it once it holds achievements. Emulator save folders always count: a
@@ -104,6 +122,14 @@ class Watcher:
                 if merged or sources:
                     games.append(GameProgress(appid, merged, sources or [t.save for t in tracked]))
             return games
+
+    def _listed(self, tracked: TrackedFile) -> bool:
+        if tracked.save.emulator != STEAM_SOURCE:
+            return True
+        # Steam caches stats for games you merely looked at; keep played or installed ones.
+        if any(s.unlocked for s in tracked.states.values()):
+            return True
+        return bool(tracked.states) and tracked.save.appid in self._steam_installed
 
     # ------------------------------------------------------------ discovery
 
@@ -120,6 +146,10 @@ class Watcher:
 
     def discover(self, notify: bool) -> None:
         saves = scan_save_roots(self.config) + self._game_dir_saves
+        if self.config.include_steam_library:
+            installed = installed_appids(steam_install_dir())
+            with self._lock:
+                self._steam_installed = installed
         for save in saves:
             with self._lock:
                 known = save.path in self._files

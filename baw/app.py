@@ -214,6 +214,10 @@ class App:
         scroll.pack(side="right", fill="y")
         self.game_tree.configure(yscrollcommand=scroll.set)
         self.game_tree.bind("<<TreeviewSelect>>", self._on_select_game)
+        self.game_tree.tag_configure("hidden", foreground="#999")
+        self.show_hidden = tk.BooleanVar(value=False)
+        self.game_menu = tk.Menu(self.root, tearoff=0)
+        self.game_tree.bind("<Button-3>", self._on_game_menu)
         panes.add(left, weight=1)
 
         right = ttk.Frame(panes, padding=(8, 0, 0, 0))
@@ -250,9 +254,14 @@ class App:
             schema = GameSchema(appid)
         return schema
 
+    def _is_hidden(self, appid: int) -> bool:
+        return appid in self.config.hidden_games
+
     def refresh(self) -> None:
         self.games = {g.appid: g for g in self.watcher.snapshot()}
-        ordered = sorted(self.games.values(), key=lambda g: (-g.last_unlock, g.appid))
+        hidden_count = sum(self._is_hidden(a) for a in self.games)
+        ordered = sorted((g for g in self.games.values() if self.show_hidden.get() or not self._is_hidden(g.appid)),
+                         key=lambda g: (self._is_hidden(g.appid), -g.last_activity, g.appid))
         existing = set(self.game_tree.get_children())
         wanted = set()
         for index, game in enumerate(ordered):
@@ -261,20 +270,56 @@ class App:
             iid = str(game.appid)
             wanted.add(iid)
             values = (f"{len(game.unlocked)}/{total}",)
+            tags = ("hidden",) if self._is_hidden(game.appid) else ()
             if iid in existing:
-                self.game_tree.item(iid, text=schema.title, values=values)
+                self.game_tree.item(iid, text=schema.title, values=values, tags=tags)
                 self.game_tree.move(iid, "", index)
             else:
-                self.game_tree.insert("", index, iid=iid, text=schema.title, values=values)
+                self.game_tree.insert("", index, iid=iid, text=schema.title, values=values, tags=tags)
         for iid in existing - wanted:
             self.game_tree.delete(iid)
         files = sum(len(g.sources) for g in self.games.values())
-        self.status.configure(text=f"Watching {files} save file(s) for {len(self.games)} game(s). "
+        hidden_note = f" ({hidden_count} hidden - right-click the list to show them)" if hidden_count else ""
+        self.status.configure(text=f"Watching {files} save file(s) for {len(self.games)} game(s){hidden_note}. "
                                    f"Leave this running (or close the window - it keeps watching).")
+        if self.selected_appid is not None and str(self.selected_appid) not in wanted:
+            self.selected_appid = None
         if self.selected_appid is None and ordered:
             self.game_tree.selection_set(str(ordered[0].appid))
+        elif self.selected_appid is None:
+            self._clear_achievements()
         elif self.selected_appid in self.games:
             self._show_achievements(self.selected_appid)
+
+    def _clear_achievements(self) -> None:
+        self.game_title.configure(text="No game selected")
+        self.game_meta.configure(text="")
+        self.progress.configure(value=0)
+        self.ach_tree.delete(*self.ach_tree.get_children())
+
+    def _on_game_menu(self, event) -> None:
+        iid = self.game_tree.identify_row(event.y)
+        menu = self.game_menu
+        menu.delete(0, "end")
+        if iid:
+            appid = int(iid)
+            self.game_tree.selection_set(iid)
+            if self._is_hidden(appid):
+                menu.add_command(label="Unhide game", command=lambda: self.set_hidden(appid, False))
+            else:
+                menu.add_command(label="Hide game", command=lambda: self.set_hidden(appid, True))
+            menu.add_separator()
+        menu.add_checkbutton(label="Show hidden games", variable=self.show_hidden, command=self.refresh)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def set_hidden(self, appid: int, hidden: bool) -> None:
+        games = [a for a in self.config.hidden_games if a != appid]
+        self.config.hidden_games = games + [appid] if hidden else games
+        self.config.save()
+        self.refresh()
 
     def _on_select_game(self, _event=None) -> None:
         selection = self.game_tree.selection()
