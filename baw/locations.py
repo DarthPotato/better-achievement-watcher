@@ -78,6 +78,19 @@ def default_roots() -> List[SaveRoot]:
     add("SKIDROW", local, "SKIDROW")
     add("SKIDROW", docs, "SKIDROW")
     add("Reloaded / 3DM", programdata, "Steam", user_level=True)
+    # CODEX-style emulators (steam_emu.ini) save to ...\Steam\<group name>\<AppID>; the
+    # group name differs per release (CODEX, RUNE, PLAZA, ...), so take every one present.
+    for base in (public / "Documents" if public else None, appdata, docs):
+        steam = base / "Steam" if base is not None else None
+        if steam is None or not steam.is_dir():
+            continue
+        add("Steam emulator", steam)
+        try:
+            groups = sorted(p for p in steam.iterdir() if p.is_dir() and not p.name.isdigit())
+        except OSError:
+            groups = []
+        for group in groups:
+            add(group.name, group)
     # De-duplicate while keeping order (e.g. when two env vars point at the same place).
     seen = set()
     unique = []

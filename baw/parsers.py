@@ -18,6 +18,7 @@ understands the dialects generically:
       ACH_NAME=0101               ACH_NAME=80b6e765
 """
 
+import datetime
 import json
 import re
 from dataclasses import dataclass
@@ -173,6 +174,11 @@ def parse_json(text: str) -> Optional[Dict[str, AchievementState]]:
             elif isinstance(entry, (bool, int)) or (isinstance(entry, str) and entry.strip().lower() in TRUE_STRINGS | FALSE_STRINGS):
                 unlocked = _truthy(entry)
                 result[name] = AchievementState(name, unlocked)
+    elif isinstance(data, list) and any(isinstance(e, dict) and "progressState" in e for e in data):
+        for entry in data:
+            if isinstance(entry, dict) and "id" in entry:
+                state = _from_xbox(entry)
+                result[state.name] = state
     elif isinstance(data, list):
         # A list without achieved flags is a schema (steam_settings/achievements.json), not a save.
         for entry in data:
@@ -183,6 +189,27 @@ def parse_json(text: str) -> Optional[Dict[str, AchievementState]]:
     else:
         return None
     return result
+
+
+def _from_xbox(entry: Dict) -> AchievementState:
+    """Xbox Live style entry (Xbox emulators such as 1911)."""
+    progression = entry.get("progression") or {}
+    unlocked = str(entry.get("progressState", "")).lower() == "achieved"
+    when = 0
+    stamp = str(progression.get("timeUnlocked") or "")
+    if unlocked and stamp and not stamp.startswith("0001"):
+        try:
+            when = int(datetime.datetime.fromisoformat(stamp[:19]).replace(tzinfo=datetime.timezone.utc).timestamp())
+        except ValueError:
+            when = 0
+    cur = mx = None
+    requirements = progression.get("requirements") or []
+    if len(requirements) == 1 and isinstance(requirements[0], dict):
+        cur = _to_number(requirements[0].get("current"))
+        mx = _to_number(requirements[0].get("target"))
+        if not mx or mx <= 1:
+            cur = mx = None
+    return AchievementState(str(entry["id"]), unlocked, when, cur, mx)
 
 
 # ---------------------------------------------------------------- INI

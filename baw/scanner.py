@@ -9,6 +9,7 @@ from typing import Dict, Iterator, List, Optional
 from .config import Config
 from .locations import SAVE_FILE_NAMES, SaveRoot, common_game_folders, default_roots, steam_install_dir
 from .steam_local import STEAM_SOURCE, stats_files
+from . import xbox
 
 STEAM_API_DLLS = {"steam_api.dll", "steam_api64.dll"}
 SKIP_DIRS = {".git", "node_modules", "__pycache__", "$recycle.bin", "windows", "system volume information"}
@@ -34,6 +35,7 @@ class GameDir:
     name: str
     schema_file: Optional[Path] = None
     saves: List[SaveFile] = field(default_factory=list)
+    schema: Optional[object] = None  # GameSchema shipped with the game (Xbox emulators)
 
 
 def _walk(base: Path, max_depth: int) -> Iterator[os.DirEntry]:
@@ -162,6 +164,14 @@ def _local_save_dirs(dll_dir: Path) -> List[Path]:
         match = re.search(r"^\s*local_save_path\s*=\s*(.+?)\s*$", _read_small(ini), re.I | re.M)
         if match:
             found.append(match.group(1))
+    # steam_emu.ini & co. sometimes name their own save folder (SavePath=, SaveDirectory=, ...).
+    try:
+        inis = [p for p in dll_dir.iterdir() if p.suffix.lower() == ".ini"]
+    except OSError:
+        inis = []
+    for ini in inis:
+        for match in re.finditer(r"^\s*\w*save\w*\s*=\s*(.*[\\/%].*?)\s*$", _read_small(ini), re.I | re.M):
+            found.append(match.group(1))
     result = []
     for value in found:
         path = Path(os.path.expandvars(value.strip('"')))
@@ -185,7 +195,10 @@ def _guess_game_name(dll_dir: Path, library: Path) -> str:
 
 def scan_game_folder(library: Path, max_depth: int = 8) -> List[GameDir]:
     games: Dict[Path, GameDir] = {}
+    xbox_candidates: List[Path] = []
     for entry in _walk(library, max_depth):
+        if entry.name.lower() == "achievements.json":
+            xbox_candidates.append(Path(entry.path))
         if entry.name.lower() not in STEAM_API_DLLS:
             continue
         dll_dir = Path(entry.path).parent
@@ -207,6 +220,16 @@ def scan_game_folder(library: Path, max_depth: int = 8) -> List[GameDir]:
             owner = int(numeric[-1]) if numeric else appid
             game.saves.append(SaveFile(owner, save.path, save.emulator))
         games[dll_dir] = game
+    for path in xbox_candidates:
+        if path.parent.name.lower() == "steam_settings" or not xbox.looks_like_xbox(path):
+            continue
+        title = xbox.title_id(path)
+        if title is None:
+            continue
+        name = _guess_game_name(path.parent, library)
+        game = GameDir(title, path.parent, name, saves=[SaveFile(title, path, xbox.SOURCE)])
+        game.schema = xbox.build_schema(title, name, path)
+        games[path] = game
     return list(games.values())
 
 

@@ -12,6 +12,7 @@ in order of preference:
 Results are cached on disk so the app works offline after the first lookup.
 """
 
+import hashlib
 import json
 import struct
 import threading
@@ -282,6 +283,7 @@ class SchemaStore:
         self._failed: Dict[int, float] = {}
         self._local_schema: Dict[int, Path] = {}
         self._local_names: Dict[int, str] = {}
+        self._fixed: Dict[int, GameSchema] = {}  # games with their own achievement list (Xbox)
         self._lock = threading.RLock()
         self._steam_dir = steam_install_dir()
 
@@ -290,6 +292,17 @@ class SchemaStore:
             self._local_names.setdefault(appid, name)
             if schema_file:
                 self._local_schema[appid] = schema_file
+
+    def register_fixed_schema(self, schema: GameSchema) -> None:
+        """A schema that comes with the game itself and must not be looked up on Steam."""
+        with self._lock:
+            self._fixed[schema.appid] = schema
+
+    def icon_cache_path(self, appid: int, url: str) -> Path:
+        name = Path(urllib.parse.urlparse(url).path).name
+        if "." not in name:  # e.g. Xbox ".../image?url=..." - every icon has the same path
+            name = hashlib.sha1(url.encode()).hexdigest()[:24] + ".png"
+        return self.cache_dir / "icons" / str(appid) / name
 
     def forget(self) -> None:
         """Drop in-memory schemas (e.g. after the language changed)."""
@@ -303,6 +316,8 @@ class SchemaStore:
 
     def cached(self, appid: int) -> Optional[GameSchema]:
         with self._lock:
+            if appid in self._fixed:
+                return self._fixed[appid]
             if appid in self._schemas:
                 return self._schemas[appid]
             try:
@@ -315,6 +330,9 @@ class SchemaStore:
     def get(self, appid: int, needed: Iterable[str] = ()) -> GameSchema:
         """Return the best known schema. Refreshes when achievements in `needed` are missing."""
         needed = set(needed)
+        with self._lock:
+            if appid in self._fixed:
+                return self._fixed[appid]
         schema = self.cached(appid)
         if schema and schema.achievements and all(n in schema.achievements for n in needed):
             return schema
@@ -383,8 +401,8 @@ class SchemaStore:
         if not source.startswith("http"):
             path = Path(source)
             return path if path.is_file() else None
-        folder = self.cache_dir / "icons" / str(appid)
-        target = folder / Path(urllib.parse.urlparse(source).path).name
+        target = self.icon_cache_path(appid, source)
+        folder = target.parent
         if target.is_file() and target.stat().st_size > 0:
             return target
         if self.offline:

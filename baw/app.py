@@ -296,7 +296,7 @@ class App:
             return None
         if not source.startswith("http"):
             return Path(source) if Path(source).is_file() else None
-        path = self.store.cache_dir / "icons" / str(appid) / source.rsplit("/", 1)[-1]
+        path = self.store.icon_cache_path(appid, source)
         return path if path.is_file() else None
 
     def _show_achievements(self, appid: int) -> None:
