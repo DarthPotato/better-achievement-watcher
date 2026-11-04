@@ -25,14 +25,15 @@ The viewer lists every game it found, with progress, unlock dates, and locked ac
 Builds of unreleased changes are under **Actions** → *build* → artifact
 `BetterAchievementWatcher-windows`.
 
-There's no installer: the exe is the whole app. A good place for it is
-`%LOCALAPPDATA%\Programs\Better Achievement Watcher\` (paste that into Explorer's
-address bar and create the folder). That's where per-user apps such as VS Code and
-Discord install, and it needs no admin rights. Avoid Downloads and the Desktop, where it
-tends to get deleted or moved. Your settings live in `%APPDATA%\BetterAchievementWatcher`
-whichever folder the exe is in, so moving it later loses nothing. If **Start with
-Windows** is on, run the exe once from its new place and the startup entry follows it.
-To update, replace the exe with the new one (quit the running copy first).
+There's no installer: the exe is the whole app. The first time you run it, it offers to
+install itself to `%LOCALAPPDATA%\Programs\Better Achievement Watcher` (where per-user apps
+such as VS Code and Discord live, no admin rights needed) with a Start menu shortcut. Your
+settings live in `%APPDATA%\BetterAchievementWatcher` either way.
+
+**Updates:** the app checks for a newer release when it starts and shows an *Update now* bar
+(or a popup if it's running in the background). It downloads the new version and restarts.
+You can turn the check off in Settings. Downloading a new exe and running it works too: it
+replaces the installed copy.
 
 **Publishing a release:** on GitHub, *Releases → Draft a new release*, create a new tag
 (e.g. `v1.7.0`; any name works) on `main`, and publish. The *build* workflow then builds
