@@ -9,7 +9,7 @@ Steam keeps two binary KeyValues files per game in ``Steam/appcache/stats``:
 This is shown in the viewer only. Steam shows its own popup for these games.
 
 Steam writes these files for any game whose library or achievement page you opened, owned
-or not, so only games that are installed or have at least one unlock are listed.
+or not, so only installed games are listed (plus, optionally, uninstalled ones with unlocks).
 """
 
 import re

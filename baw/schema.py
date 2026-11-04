@@ -56,6 +56,9 @@ class GameSchema:
     name: str = ""
     achievements: Dict[str, AchievementInfo] = field(default_factory=dict)
     source: str = ""
+    # True once the name was looked up on the Steam store. Steam's own cache only has an
+    # internal name ("Lost Ark Test 1"), so that one is a fallback.
+    name_checked: bool = False
 
     @property
     def title(self) -> str:
@@ -73,6 +76,7 @@ class GameSchema:
             "appid": self.appid,
             "name": self.name,
             "source": self.source,
+            "name_checked": self.name_checked,
             "fetched": int(time.time()),
             "achievements": [asdict(a) for a in self.achievements.values()],
         }
@@ -83,7 +87,8 @@ class GameSchema:
         for entry in data.get("achievements", []):
             info = AchievementInfo(**{k: v for k, v in entry.items() if k in AchievementInfo.__dataclass_fields__})
             achievements[info.name] = info
-        return cls(int(data["appid"]), data.get("name", ""), achievements, data.get("source", ""))
+        return cls(int(data["appid"]), data.get("name", ""), achievements, data.get("source", ""),
+                   bool(data.get("name_checked")))
 
 
 # ---------------------------------------------------------------- helpers
@@ -399,7 +404,7 @@ class SchemaStore:
                 return self._fixed[appid]
         schema = self.cached(appid)
         if schema and schema.achievements and all(n in schema.achievements for n in needed):
-            if not schema.name:
+            if not schema.name_checked:
                 self._fill_name(schema)
             return schema
         with self._lock:
@@ -426,7 +431,7 @@ class SchemaStore:
             return schema
 
     def _fill_name(self, schema: GameSchema) -> None:
-        """Look up a missing game name (e.g. a cached schema from before names were fixed)."""
+        """Look up the store name for a cached schema that hasn't had one yet."""
         with self._lock:
             if schema.appid in self._failed or self.offline:
                 schema.name = schema.name or self._local_names.get(schema.appid, "")
@@ -435,9 +440,10 @@ class SchemaStore:
         with self._lock:
             if not name:
                 self._failed[schema.appid] = time.time()
-                schema.name = self._local_names.get(schema.appid, "")
+                schema.name = schema.name or self._local_names.get(schema.appid, "")
                 return
             schema.name = name
+            schema.name_checked = True
             try:
                 self._cache_path(schema.appid).write_text(json.dumps(schema.to_json(), indent=1), encoding="utf-8")
             except OSError:
@@ -457,11 +463,15 @@ class SchemaStore:
             lambda: schema_from_steam_cache(appid, lang, self._steam_dir),
         ]
         merged = GameSchema(appid)
+        cache_name = ""
         for source in sources:
             found = source()
             if not found:
                 continue
-            merged.name = merged.name or found.name
+            if found.source == "Steam cache":
+                cache_name = cache_name or found.name
+            else:
+                merged.name = merged.name or found.name
             merged.source = merged.source or found.source
             for name, info in found.achievements.items():
                 existing = merged.achievements.get(name)
@@ -473,6 +483,8 @@ class SchemaStore:
                 break
         if not merged.name and not self.offline:
             merged.name = game_name_from_store(appid)
+            merged.name_checked = bool(merged.name)
+        merged.name = merged.name or cache_name
         if not merged.name:
             merged.name = self._local_names.get(appid, "")
         return merged

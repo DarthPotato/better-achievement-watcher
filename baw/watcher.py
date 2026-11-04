@@ -126,10 +126,13 @@ class Watcher:
     def _listed(self, tracked: TrackedFile) -> bool:
         if tracked.save.emulator != STEAM_SOURCE:
             return True
-        # Steam caches stats for games you merely looked at; keep played or installed ones.
-        if any(s.unlocked for s in tracked.states.values()):
+        # Steam caches stats for every game page you open, so list installed games (and,
+        # if asked for, uninstalled ones you unlocked something in).
+        if not tracked.states:
+            return False
+        if tracked.save.appid in self._steam_installed:
             return True
-        return bool(tracked.states) and tracked.save.appid in self._steam_installed
+        return self.config.include_uninstalled_steam and any(s.unlocked for s in tracked.states.values())
 
     # ------------------------------------------------------------ discovery
 

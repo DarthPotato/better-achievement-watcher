@@ -284,11 +284,12 @@ class MoreDetectionTests(unittest.TestCase):
 
         base = Path(tempfile.mkdtemp(dir=TMP))
         path = write(base / "UserGameStats_1_5.bin", "")
-        config = Config(scan_default_locations=False)
+        config = Config(scan_default_locations=False, include_steam_library=False, scan_common_game_folders=False)
         events = []
         w = Watcher(config, SchemaStore(config, offline=True), on_unlock=lambda a, s: events.append(a))
         states = [{}, {"X": watcher_module.AchievementState("X", True)}]
         with mock.patch.object(watcher_module, "parse_steam_stats", side_effect=lambda p: states[0]):
+            w._steam_installed = {5}
             w._files[path] = watcher_module.TrackedFile(SaveFile(5, path, "Steam"))
             w.poll()
             states.pop(0)
@@ -440,7 +441,7 @@ class StartupTests(unittest.TestCase):
 
 
 class SteamListingTests(unittest.TestCase):
-    def test_only_installed_or_played_steam_games_listed(self):
+    def test_only_installed_steam_games_listed(self):
         from baw import watcher as watcher_module
         from baw.scanner import SaveFile
         from baw.steam_local import installed_appids
@@ -461,7 +462,9 @@ class SteamListingTests(unittest.TestCase):
         for appid, states in ((1, locked), (2, {}), (3, locked), (4, played)):
             path = Path(f"UserGameStats_9_{appid}.bin")
             w._files[path] = watcher_module.TrackedFile(SaveFile(appid, path, "Steam"), states=states)
-        # 1: installed, 2: installed but no achievements, 3: only looked at, 4: played
+        # 1: installed, 2: installed but no achievements, 3: only looked at, 4: played, uninstalled
+        self.assertEqual(sorted(g.appid for g in w.snapshot()), [1])
+        config.include_uninstalled_steam = True
         self.assertEqual(sorted(g.appid for g in w.snapshot()), [1, 4])
 
 
@@ -525,3 +528,31 @@ class BorrowedAppIdTests(unittest.TestCase):
         self.assertEqual(store.borrowed_by(1934680, ["ach_win"]), "")  # saves prove it's the real game
         store.register_game_dir(1934680, "Age of Mythology Retold", None)
         self.assertEqual(store.borrowed_by(1934680, []), "")
+
+
+class NameAndFilterTests(unittest.TestCase):
+    def test_store_name_beats_steam_cache_name(self):
+        from baw import schema as schema_module
+
+        with_achievements = GameSchema(1599340, "", source="Steam")
+        with_achievements.achievements["A"] = with_achievements.info("A")
+        cache = GameSchema(1599340, "Lost Ark Test 1", dict(with_achievements.achievements), source="Steam cache")
+        config = Config()
+        with mock.patch.object(schema_module, "schema_from_keyless_api", return_value=with_achievements), \
+                mock.patch.object(schema_module, "schema_from_steam_cache", return_value=cache), \
+                mock.patch.object(schema_module, "game_name_from_store", return_value="Lost Ark"):
+            store = SchemaStore(config)
+            self.assertEqual(store.get(1599340).title, "Lost Ark")
+        # An old cache file holding the cache name gets the store name on the next lookup.
+        old = GameSchema(77, "Lost Ark Test 1", dict(with_achievements.achievements), source="Steam")
+        store._schemas[77] = GameSchema.from_json(old.to_json())
+        with mock.patch.object(schema_module, "game_name_from_store", return_value="Real Name"):
+            self.assertEqual(store.get(77).title, "Real Name")
+
+    def test_source_filters(self):
+        from baw.app import FILTERS
+
+        self.assertTrue(FILTERS["Steam"]({"Steam"}))
+        self.assertFalse(FILTERS["Steam"]({"RUNE"}))
+        self.assertTrue(FILTERS["Emulators & other"]({"RUNE", "Local save"}))
+        self.assertTrue(all(FILTERS["All games"](e) for e in ({"Steam"}, {"RUNE"})))
