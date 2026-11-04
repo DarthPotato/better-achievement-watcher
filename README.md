@@ -25,10 +25,10 @@ The viewer lists every game it found, with progress, unlock dates, and locked ac
 Builds of unreleased changes are under **Actions** → *build* → artifact
 `BetterAchievementWatcher-windows`.
 
-**Publishing a release:** create a new release on GitHub with a new tag such as
-`v1.7.0` (or push the tag with `git tag v1.7.0 && git push origin v1.7.0`). The *build*
-workflow then builds the exe with that version number and attaches it to the release
-automatically.
+**Publishing a release:** on GitHub, *Releases → Draft a new release*, create a new tag
+(e.g. `v1.7.0`; any name works) on `main`, and publish. The *build* workflow then builds
+the exe with that version number and attaches it to the release within a few minutes.
+A tag pushed without a release doesn't trigger this.
 
 **From source** (Python 3.9+):
 
