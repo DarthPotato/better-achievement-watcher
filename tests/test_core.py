@@ -437,3 +437,66 @@ class StartupTests(unittest.TestCase):
             with mock.patch.object(startup, "_registered_command", return_value=""):
                 startup.repair()
         self.assertEqual(calls, [True])
+
+
+class SteamListingTests(unittest.TestCase):
+    def test_only_installed_or_played_steam_games_listed(self):
+        from baw import watcher as watcher_module
+        from baw.scanner import SaveFile
+        from baw.steam_local import installed_appids
+
+        steam = Path(tempfile.mkdtemp(dir=TMP))
+        other = Path(tempfile.mkdtemp(dir=TMP))
+        write(steam / "steamapps/appmanifest_1.acf", "")
+        write(steam / "steamapps/libraryfolders.vdf", '"libraryfolders"\n{\n "1"\n {\n  "path"  "%s"\n }\n}\n'
+              % str(other).replace("\\", "\\\\"))
+        write(other / "steamapps/appmanifest_2.acf", "")
+        self.assertEqual(installed_appids(steam), {1, 2})
+
+        config = Config(scan_default_locations=False, include_steam_library=False)
+        w = Watcher(config, SchemaStore(config, offline=True))
+        w._steam_installed = {1, 2}
+        locked = {"A": watcher_module.AchievementState("A", False)}
+        played = {"A": watcher_module.AchievementState("A", True)}
+        for appid, states in ((1, locked), (2, {}), (3, locked), (4, played)):
+            path = Path(f"UserGameStats_9_{appid}.bin")
+            w._files[path] = watcher_module.TrackedFile(SaveFile(appid, path, "Steam"), states=states)
+        # 1: installed, 2: installed but no achievements, 3: only looked at, 4: played
+        self.assertEqual(sorted(g.appid for g in w.snapshot()), [1, 4])
+
+
+@unittest.skipUnless(importlib.util.find_spec("tkinter"), "needs Tk")
+class HideGameTests(unittest.TestCase):
+    def test_hide_and_unhide_from_menu(self):
+        import tkinter as tk
+
+        try:
+            tk.Tk().destroy()
+        except tk.TclError:
+            self.skipTest("no display")
+        from baw.app import App
+
+        base = Path(tempfile.mkdtemp(dir=TMP))
+        write(base / "111" / "achievements.json", {"A": {"earned": True, "earned_time": 5}})
+        write(base / "222" / "achievements.ini", "[SteamAchievements]\nCount=0\n")
+        config = Config(scan_default_locations=False, include_steam_library=False, scan_common_game_folders=False,
+                        extra_save_roots=[str(base)])
+        app = App(config, offline=True)
+        try:
+            app.watcher.initial_scan()
+            app.refresh()
+            app.root.update()
+            app.game_menu.tk_popup = lambda *a: None
+            event = mock.Mock(x=5, y=app.game_tree.bbox("222")[1] + 2, x_root=0, y_root=0)
+            app._on_game_menu(event)
+            self.assertEqual(app.game_menu.entrycget(0, "label"), "Hide game")
+            app.game_menu.invoke(0)
+            self.assertEqual(Config.load().hidden_games, [222])
+            self.assertFalse(app.game_tree.exists("222"))
+            app.show_hidden.set(True)
+            app.refresh()
+            self.assertEqual(app.game_tree.item("222", "tags"), ("hidden",))
+            app.set_hidden(222, False)
+            self.assertEqual(app.config.hidden_games, [])
+        finally:
+            app.root.destroy()
