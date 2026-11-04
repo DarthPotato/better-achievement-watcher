@@ -420,3 +420,20 @@ class NativeSaveTests(unittest.TestCase):
 
         self.assertEqual(_real_name("ValveTestApp34250"), "")
         self.assertEqual(_real_name("Portal 2"), "Portal 2")
+
+
+class StartupTests(unittest.TestCase):
+    def test_repair_repoints_moved_exe(self):
+        from baw import startup
+
+        calls = []
+        with mock.patch.object(startup, "supported", return_value=True), \
+                mock.patch.object(startup.sys, "frozen", True, create=True), \
+                mock.patch.object(startup, "set_enabled", side_effect=calls.append):
+            with mock.patch.object(startup, "_registered_command", return_value='"Z:\gone\BAW.exe" --background'):
+                startup.repair()
+            with mock.patch.object(startup, "_registered_command", return_value=f'"{__file__}" --background'):
+                startup.repair()
+            with mock.patch.object(startup, "_registered_command", return_value=""):
+                startup.repair()
+        self.assertEqual(calls, [True])
