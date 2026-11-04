@@ -124,7 +124,7 @@ class ScannerTests(unittest.TestCase):
         write(self.base / "Roaming/CreamAPI/888/stats/CreamAPI.Achievements.cfg", "[A]\nachieved=1\n")
         write(self.base / "Roaming/Goldberg SteamEmu Saves/settings/achievements.json", {})  # not an appid
         with mock.patch.dict(os.environ, self.env):
-            saves = scan_save_roots(Config())
+            saves = scan_save_roots(Config(include_steam_library=False))
         found = {(s.appid, s.emulator) for s in saves}
         self.assertEqual(found, {
             (111, "Goldberg"), (222, "GSE (gbe_fork)"), (333, "CODEX"), (444, "RUNE"), (555, "EMPRESS"),
@@ -158,7 +158,8 @@ class WatcherTests(unittest.TestCase):
         base = Path(tempfile.mkdtemp(dir=TMP))
         save = write(base / "123" / "achievements.json", {"A": {"earned": True, "earned_time": 1}, "B": {"earned": False}})
         write(base / "999" / "achievements.json", {"Z": {"earned": True}})
-        config = Config(scan_default_locations=False, extra_save_roots=[str(base)])
+        config = Config(scan_default_locations=False, extra_save_roots=[str(base)],
+                        scan_common_game_folders=False, include_steam_library=False)
         events = []
         watcher = Watcher(config, SchemaStore(config, offline=True), on_unlock=lambda a, s: events.append((a, [x.name for x in s])))
         watcher.initial_scan()
@@ -377,3 +378,45 @@ class XboxEmulatorTests(unittest.TestCase):
         w = Watcher(config, SchemaStore(config, offline=True))
         w.initial_scan()
         self.assertEqual([(g.appid, len(g.unlocked)) for g in w.snapshot()], [(239140, 0)])
+
+
+class NativeSaveTests(unittest.TestCase):
+    def test_restory_save(self):
+        import gzip
+
+        from baw.native import parse_restory
+
+        user = Path(tempfile.mkdtemp(dir=TMP))
+        folder = user / "AppData/LocalLow/Mandragora/Restory/SaveData"
+        folder.mkdir(parents=True)
+        path = folder / "achievements.slot1.release.restory"
+
+        def save(*labels):
+            data = {"UnlockedAchievements": [{"AchievementID": label} for label in labels],
+                    "$version": "AchievementsManagerSaveDataV02"}
+            path.write_bytes(gzip.compress(json.dumps(data).encode()))
+
+        save("Achievement - 1 First repair!", "Achievement - Twist-and-turn")
+        (folder / "gameSettings.slot1.release.restory").write_bytes(gzip.compress(b"{}"))
+        self.assertEqual(unlocked(parse_restory(path)), {"ACH_FIRST_REPAIR", "ACH_TWIST_AND_TURN"})
+        path.with_name("half.restory").write_bytes(gzip.compress(b"{}")[:10])
+        self.assertIsNone(parse_restory(path.with_name("half.restory")))
+
+        config = Config(include_steam_library=False, scan_common_game_folders=False)
+        events = []
+        w = Watcher(config, SchemaStore(config, offline=True), on_unlock=lambda a, s: events.append((a, [x.name for x in s])))
+        with mock.patch.dict(os.environ, {"USERPROFILE": str(user), "APPDATA": str(user / "R"),
+                                          "LOCALAPPDATA": str(user / "L"), "PUBLIC": str(user / "P"),
+                                          "PROGRAMDATA": str(user / "PD")}):
+            w.initial_scan()
+            self.assertEqual([(g.appid, len(g.unlocked)) for g in w.snapshot()], [(3812600, 2)])
+            save("Achievement - 1 First repair!", "Achievement - Twist-and-turn", "Achievement - How did I do it?")
+            os.utime(path, (time.time() + 5, time.time() + 5))
+            w.poll()
+        self.assertEqual(events, [(3812600, ["ACH_HOW_DID_I_DO_IT"])])
+
+    def test_placeholder_steam_names_ignored(self):
+        from baw.schema import _real_name
+
+        self.assertEqual(_real_name("ValveTestApp34250"), "")
+        self.assertEqual(_real_name("Portal 2"), "Portal 2")

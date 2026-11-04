@@ -50,6 +50,11 @@ def cmd_doctor(config: Config) -> int:
         exists = root.path.is_dir()
         count = len(scan_root(root)) if exists else 0
         print(f"  [{'found' if exists else '  -  '}] {root.emulator:<16} {root.path}" + (f"  ({count} save files)" if exists else ""))
+    if config.scan_default_locations:
+        from . import native
+
+        for game, path in native.find_saves():
+            print(f"  [found] {game.source:<16} {path}")
     steam = steam_install_dir()
     print(f"\nSteam: {steam or 'not found'}")
     if steam and config.include_steam_library:
@@ -89,6 +94,12 @@ def main(argv=None) -> int:
     parser.add_argument("--offline", action="store_true", help="don't contact Steam (use cached/local names)")
     parser.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
     args = parser.parse_args(argv)
+    for stream in (sys.stdout, sys.stderr):
+        # Piped output defaults to the ANSI code page, which can't encode e.g. Japanese names.
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     config = Config.load()
 
     if args.command == "scan":

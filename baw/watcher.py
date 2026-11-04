@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from .config import Config
+from . import native
 from .parsers import AchievementState, parse_file
 from .scanner import SaveFile, scan_game_folders, scan_save_roots
 from .steam_local import STEAM_SOURCE, parse_steam_stats
@@ -141,7 +142,7 @@ class Watcher:
         if tracked.save.emulator == STEAM_SOURCE:
             states = parse_steam_stats(tracked.save.path)
         else:
-            states = parse_file(tracked.save.path)
+            states = (native.parser_for(tracked.save.emulator) or parse_file)(tracked.save.path)
         if states is None:
             # Probably caught the emulator mid-write: retry on the next poll. A file that
             # stays unreadable (unsupported binary format) is only re-read once it changes.
