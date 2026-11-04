@@ -21,9 +21,14 @@ The viewer lists every game it found, with progress, unlock dates, and locked ac
 
 ## Getting it
 
-**Windows exe:** every push builds `BetterAchievementWatcher.exe` on GitHub Actions. Open
-the latest *build* run under the repo's **Actions** tab, download the
-`BetterAchievementWatcher-windows` artifact, and unzip it.
+**Windows exe:** download `BetterAchievementWatcher.exe` from the repo's **Releases**.
+Builds of unreleased changes are under **Actions** → *build* → artifact
+`BetterAchievementWatcher-windows`.
+
+**Publishing a release:** create a new release on GitHub with a new tag such as
+`v1.7.0` (or push the tag with `git tag v1.7.0 && git push origin v1.7.0`). The *build*
+workflow then builds the exe with that version number and attaches it to the release
+automatically.
 
 **From source** (Python 3.9+):
 
