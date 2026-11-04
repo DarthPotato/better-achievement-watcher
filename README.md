@@ -25,6 +25,15 @@ The viewer lists every game it found, with progress, unlock dates, and locked ac
 Builds of unreleased changes are under **Actions** → *build* → artifact
 `BetterAchievementWatcher-windows`.
 
+There's no installer: the exe is the whole app. A good place for it is
+`%LOCALAPPDATA%\Programs\Better Achievement Watcher\` (paste that into Explorer's
+address bar and create the folder). That's where per-user apps such as VS Code and
+Discord install, and it needs no admin rights. Avoid Downloads and the Desktop, where it
+tends to get deleted or moved. Your settings live in `%APPDATA%\BetterAchievementWatcher`
+whichever folder the exe is in, so moving it later loses nothing. If **Start with
+Windows** is on, run the exe once from its new place and the startup entry follows it.
+To update, replace the exe with the new one (quit the running copy first).
+
 **Publishing a release:** on GitHub, *Releases → Draft a new release*, create a new tag
 (e.g. `v1.7.0`; any name works) on `main`, and publish. The *build* workflow then builds
 the exe with that version number and attaches it to the release within a few minutes.
@@ -46,13 +55,18 @@ Click **Test popup** to confirm popups show up, then just play. In **Settings**:
   along with the `steam_settings` achievement list.
 * **Show games you own on Steam**: also lists the achievements of your real Steam
   games, read from Steam's local cache. These never pop up, since Steam already shows
-  its own popup for them.
+  its own popup for them. Steam caches stats for every game page you open, so only games
+  that are installed or have at least one unlock are listed.
 * **Sound**: Steam's own achievement sound, played straight from your Steam install
   (`steamui\sounds\deck_ui_achievement_toast.wav`; it isn't bundled with this app).
   If Steam isn't installed it uses a built-in chime. You can also pick any `.wav`.
 * **Start with Windows**: runs it hidden in the background at login. Popups still show,
   and launching the app again opens the window.
 * Language, popup corner, size, duration, and sound.
+
+Right-click a game in the list to **hide** it, e.g. saves left behind by a game you
+uninstalled. Right-click → **Show hidden games** brings them back. Hidden games still
+get popups.
 
 Closing the window keeps the app watching. Use **Quit** to stop it.
 
@@ -70,6 +84,7 @@ Closing the window keeps the app watching. Use **Quit** to stop it.
 | SKIDROW | `%LOCALAPPDATA%\SKIDROW\<AppID>\`, `Documents\SKIDROW\<AppID>\` |
 | Reloaded / 3DM | `%PROGRAMDATA%\Steam\<user>\<AppID>\stats\achievements.ini` |
 | Local saves | Anything under a game folder, next to `steam_api(64).dll` |
+| Games with their own achievement save | ReStory: `%USERPROFILE%\AppData\LocalLow\Mandragora\Restory\SaveData\achievements.slot*.restory` |
 | Steam (owned games) | `Steam\appcache\stats\UserGameStats_<account>_<AppID>.bin` (viewer only) |
 | Anything else | Add it under **Extra save folders**, laid out as `<folder>\<AppID>\...` |
 
@@ -77,6 +92,14 @@ The parser isn't tied to one crack group. It reads the JSON and INI dialects gen
 `earned`/`Achieved`/`achieved`/`State` flags, decimal or hex little-endian unlock times,
 `CurProgress`/`MaxProgress`, and UTF-16 files. A new crack that writes a similar file
 usually works once you point an extra folder at it.
+
+Some releases remove the Steam layer instead of using an emulator, and the game then
+keeps achievements in its own save format. Those need support per game (ReStory so far).
+
+Some releases run a game under another game's AppID (e.g. Tiny Glade as Age of
+Mythology: Retold). When the game's folder name doesn't resemble that AppID's Steam name
+and none of the saved achievements belong to it, the game is listed under its folder
+name with a note that its achievements can't be tracked.
 
 Not supported: SmartSteamEmu's binary `stats.bin`, and games whose emulator doesn't save
 achievements to disk at all. Some cracks ship without achievement support; there is
