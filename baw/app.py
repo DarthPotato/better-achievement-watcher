@@ -15,7 +15,9 @@ from . import APP_NAME, __version__, startup
 from .config import Config
 from .notify import Notifier, PopupSpec, demo_spec, enable_dpi_awareness, load_icon
 from .parsers import AchievementState
-from .scanner import save_roots
+from .locations import steam_install_dir
+from .notify import play_sound, steam_sound
+from .scanner import game_folder_list, save_roots
 from .schema import GameSchema, SchemaStore
 from .watcher import GameProgress, Watcher
 
@@ -345,7 +347,7 @@ class SettingsDialog:
         cfg = app.config
         win = self.win = tk.Toplevel(app.root)
         win.title("Settings")
-        win.geometry("640x620")
+        win.geometry("680x680")
         win.transient(app.root)
         body = ttk.Frame(win, padding=10)
         body.pack(fill="both", expand=True)
@@ -366,6 +368,10 @@ class SettingsDialog:
         self.defaults = tk.BooleanVar(value=cfg.scan_default_locations)
         self.keep = tk.BooleanVar(value=cfg.keep_running_on_close)
         self.autostart = tk.BooleanVar(value=startup.is_enabled())
+        self.common = tk.BooleanVar(value=cfg.scan_common_game_folders)
+        self.steam_library = tk.BooleanVar(value=cfg.include_steam_library)
+        self.sound_file = cfg.sound_file
+        self.sound_choice = tk.StringVar(value=self._sound_label(cfg.sound_style, cfg.sound_file))
         rows = [
             ("Language (Steam name, e.g. english, german, french)", ttk.Entry(grid, textvariable=self.language)),
             ("Steam Web API key (optional, rarely needed)", ttk.Entry(grid, textvariable=self.api_key, show="*")),
@@ -373,6 +379,7 @@ class SettingsDialog:
                                             values=["bottom-right", "bottom-left", "top-right", "top-left"])),
             ("Popup seconds", ttk.Entry(grid, textvariable=self.seconds, width=8)),
             ("Popup size (1.0 = normal)", ttk.Entry(grid, textvariable=self.scale, width=8)),
+            ("Sound", self._sound_row(grid)),
         ]
         for r, (label, widget) in enumerate(rows):
             ttk.Label(grid, text=label).grid(row=r, column=0, sticky="w", pady=2)
@@ -380,15 +387,22 @@ class SettingsDialog:
         grid.columnconfigure(1, weight=1)
         ttk.Checkbutton(body, text="Play sound", variable=self.sound).pack(anchor="w")
         ttk.Checkbutton(body, text="Scan the standard emulator save folders", variable=self.defaults).pack(anchor="w")
+        ttk.Checkbutton(body, text="Also search Games / GOG Games folders on every drive", variable=self.common).pack(anchor="w")
+        ttk.Checkbutton(body, text="Show games you own on Steam (no popups for these - Steam shows its own)",
+                        variable=self.steam_library).pack(anchor="w")
         ttk.Checkbutton(body, text="Keep watching when the window is closed", variable=self.keep).pack(anchor="w")
         if startup.supported():
             ttk.Checkbutton(body, text="Start with Windows (in the background)", variable=self.autostart).pack(anchor="w")
 
-        ttk.Label(body, text="Checked save locations:").pack(anchor="w", pady=(8, 0))
-        info = tk.Text(body, height=7, wrap="none", font=("Consolas", 9))
+        ttk.Label(body, text="Checked locations:").pack(anchor="w", pady=(8, 0))
+        info = tk.Text(body, height=6, wrap="none", font=("Consolas", 9))
         for root in save_roots(cfg):
             mark = "found  " if root.path.is_dir() else "missing"
             info.insert("end", f"[{mark}] {root.emulator:<16} {root.path}\n")
+        for folder in game_folder_list(cfg):
+            info.insert("end", f"[found  ] {'Game folder':<16} {folder}\n")
+        steam = steam_install_dir()
+        info.insert("end", f"[{'found  ' if steam else 'missing'}] {'Steam':<16} {steam or 'not installed'}\n")
         info.configure(state="disabled")
         info.pack(fill="both", expand=True)
 
@@ -397,6 +411,42 @@ class SettingsDialog:
         ttk.Button(buttons, text="Save", command=self.save).pack(side="right")
         ttk.Button(buttons, text="Cancel", command=win.destroy).pack(side="right", padx=6)
         ttk.Button(buttons, text="Open data folder", command=self._open_data).pack(side="left")
+
+    SOUND_LABELS = {"steam": "Steam achievement sound", "chime": "Built-in chime", "custom": "Custom .wav file"}
+
+    def _sound_label(self, style: str, sound_file: str) -> str:
+        return self.SOUND_LABELS["custom" if sound_file else style if style in self.SOUND_LABELS else "steam"]
+
+    def _sound_row(self, parent) -> ttk.Frame:
+        row = ttk.Frame(parent)
+        combo = ttk.Combobox(row, textvariable=self.sound_choice, state="readonly",
+                             values=list(self.SOUND_LABELS.values()), width=26)
+        combo.pack(side="left")
+
+        def chosen(_event=None) -> None:
+            if self.sound_choice.get() == self.SOUND_LABELS["custom"]:
+                path = filedialog.askopenfilename(parent=self.win, filetypes=[("WAV audio", "*.wav")])
+                if path:
+                    self.sound_file = os.path.normpath(path)
+                else:
+                    self.sound_choice.set(self.SOUND_LABELS["steam"])
+
+        def preview() -> None:
+            test = Config(**{**self.app.config.__dict__, "sound": True, **self._sound_settings()})
+            play_sound(test)
+
+        combo.bind("<<ComboboxSelected>>", chosen)
+        ttk.Button(row, text="Play", command=preview, width=6).pack(side="left", padx=4)
+        if steam_sound() is None:
+            ttk.Label(row, text="(Steam not found - uses the chime)", foreground="#888").pack(side="left")
+        return row
+
+    def _sound_settings(self) -> dict:
+        label = self.sound_choice.get()
+        style = next((k for k, v in self.SOUND_LABELS.items() if v == label), "steam")
+        if style == "custom":
+            return {"sound_style": "steam", "sound_file": self.sound_file}
+        return {"sound_style": style, "sound_file": ""}
 
     def _folder_list(self, parent, label: str, values: List[str]) -> tk.Listbox:
         ttk.Label(parent, text=label).pack(anchor="w")
@@ -440,6 +490,10 @@ class SettingsDialog:
         cfg.sound = self.sound.get()
         cfg.scan_default_locations = self.defaults.get()
         cfg.keep_running_on_close = self.keep.get()
+        cfg.scan_common_game_folders = self.common.get()
+        cfg.include_steam_library = self.steam_library.get()
+        for key, value in self._sound_settings().items():
+            setattr(cfg, key, value)
         cfg.save()
         if startup.supported():
             try:

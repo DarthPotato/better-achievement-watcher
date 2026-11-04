@@ -89,6 +89,43 @@ def default_roots() -> List[SaveRoot]:
     return unique
 
 
+COMMON_GAME_FOLDERS = (
+    "Games",
+    "GOG Games",
+    r"Program Files (x86)\GOG Galaxy\Games",
+    r"Program Files\GOG Galaxy\Games",
+)
+
+
+def fixed_drives() -> List[Path]:
+    """Local hard drives only (skips card readers / DVD drives that can stall or prompt)."""
+    if sys.platform != "win32":
+        return []
+    try:
+        import ctypes
+
+        mask = ctypes.windll.kernel32.GetLogicalDrives()
+        drives = []
+        for i in range(26):
+            if mask >> i & 1:
+                root = f"{chr(65 + i)}:\\"
+                if ctypes.windll.kernel32.GetDriveTypeW(root) == 3:  # DRIVE_FIXED
+                    drives.append(Path(root))
+        return drives
+    except Exception:
+        return [Path("C:\\")]
+
+
+def common_game_folders() -> List[Path]:
+    found = []
+    for drive in fixed_drives():
+        for name in COMMON_GAME_FOLDERS:
+            path = drive / name
+            if path.is_dir():
+                found.append(path)
+    return found
+
+
 def steam_install_dir() -> Optional[Path]:
     candidates: List[Path] = []
     if sys.platform == "win32":

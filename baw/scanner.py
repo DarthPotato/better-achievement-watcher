@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Dict, Iterator, List, Optional
 
 from .config import Config
-from .locations import SAVE_FILE_NAMES, SaveRoot, default_roots
+from .locations import SAVE_FILE_NAMES, SaveRoot, common_game_folders, default_roots, steam_install_dir
+from .steam_local import STEAM_SOURCE, stats_files
 
 STEAM_API_DLLS = {"steam_api.dll", "steam_api64.dll"}
 SKIP_DIRS = {".git", "node_modules", "__pycache__", "$recycle.bin", "windows", "system volume information"}
@@ -105,6 +106,8 @@ def scan_save_roots(config: Config) -> List[SaveFile]:
     saves: List[SaveFile] = []
     for root in save_roots(config):
         saves.extend(scan_root(root))
+    if config.include_steam_library:
+        saves.extend(SaveFile(appid, path, STEAM_SOURCE) for appid, path in stats_files(steam_install_dir()))
     return saves
 
 
@@ -119,11 +122,16 @@ def _read_small(path: Path, limit: int = 65536) -> str:
         return ""
 
 
-def detect_appid(dll_dir: Path) -> Optional[int]:
+def _appid_from_txt(path: Path) -> Optional[int]:
+    words = _read_small(path).split()
+    return int(words[0]) if words and words[0].isdigit() and int(words[0]) > 0 else None
+
+
+def detect_appid(dll_dir: Path, game_root: Optional[Path] = None) -> Optional[int]:
     for folder in (dll_dir, dll_dir / "steam_settings", dll_dir.parent, dll_dir.parent.parent):
-        text = _read_small(folder / "steam_appid.txt").strip()
-        if text.split() and text.split()[0].isdigit():
-            return int(text.split()[0])
+        appid = _appid_from_txt(folder / "steam_appid.txt")
+        if appid:
+            return appid
     try:
         inis = [p for p in dll_dir.iterdir() if p.suffix.lower() in (".ini", ".cfg", ".txt")]
     except OSError:
@@ -133,7 +141,35 @@ def detect_appid(dll_dir: Path) -> Optional[int]:
             match = pattern.search(_read_small(ini))
             if match and int(match.group(1)) > 0:
                 return int(match.group(1))
+    # Unreal games keep steam_api in Engine\Binaries\ThirdParty\... but steam_appid.txt
+    # next to the game's exe, so look anywhere in the game's own folder.
+    if game_root is not None and game_root != dll_dir:
+        for entry in _walk(game_root, 5):
+            if entry.name.lower() == "steam_appid.txt":
+                appid = _appid_from_txt(Path(entry.path))
+                if appid:
+                    return appid
     return None
+
+
+def _local_save_dirs(dll_dir: Path) -> List[Path]:
+    """Save folders configured outside the game folder (Goldberg local_save.txt, gbe_fork configs.user.ini)."""
+    found = []
+    text = _read_small(dll_dir / "local_save.txt").strip()
+    if text:
+        found.append(text.splitlines()[0].strip())
+    for ini in (dll_dir / "steam_settings" / "configs.user.ini", dll_dir / "steam_settings" / "configs.main.ini"):
+        match = re.search(r"^\s*local_save_path\s*=\s*(.+?)\s*$", _read_small(ini), re.I | re.M)
+        if match:
+            found.append(match.group(1))
+    result = []
+    for value in found:
+        path = Path(os.path.expandvars(value.strip('"')))
+        path = path if path.is_absolute() else dll_dir / path
+        base = dll_dir.resolve()
+        if path.is_dir() and base not in path.resolve().parents and path.resolve() != base:
+            result.append(path)
+    return result
 
 
 def _guess_game_name(dll_dir: Path, library: Path) -> str:
@@ -147,7 +183,7 @@ def _guess_game_name(dll_dir: Path, library: Path) -> str:
     return dll_dir.name
 
 
-def scan_game_folder(library: Path, max_depth: int = 6) -> List[GameDir]:
+def scan_game_folder(library: Path, max_depth: int = 8) -> List[GameDir]:
     games: Dict[Path, GameDir] = {}
     for entry in _walk(library, max_depth):
         if entry.name.lower() not in STEAM_API_DLLS:
@@ -155,11 +191,16 @@ def scan_game_folder(library: Path, max_depth: int = 6) -> List[GameDir]:
         dll_dir = Path(entry.path).parent
         if dll_dir in games:
             continue
-        appid = detect_appid(dll_dir)
+        name = _guess_game_name(dll_dir, library)
+        appid = detect_appid(dll_dir, library / name)
         if appid is None:
             continue
         schema = dll_dir / "steam_settings" / "achievements.json"
-        game = GameDir(appid, dll_dir, _guess_game_name(dll_dir, library), schema if schema.is_file() else None)
+        game = GameDir(appid, dll_dir, name, schema if schema.is_file() else None)
+        for folder in _local_save_dirs(dll_dir):
+            for save in _saves_in(folder, appid, "Local save"):
+                numeric = [p for p in save.path.relative_to(folder).parts[:-1] if p.isdigit()]
+                game.saves.append(SaveFile(int(numeric[-1]) if numeric else appid, save.path, save.emulator))
         for save in _saves_in(dll_dir, appid, "Local save", max_depth=4):
             # Saves inside "<local save dir>/<appid>/" belong to that appid.
             numeric = [p for p in save.path.relative_to(dll_dir).parts[:-1] if p.isdigit()]
@@ -169,10 +210,21 @@ def scan_game_folder(library: Path, max_depth: int = 6) -> List[GameDir]:
     return list(games.values())
 
 
+def game_folder_list(config: Config) -> List[Path]:
+    folders = [Path(os.path.expandvars(f)) for f in config.game_folders]
+    if config.scan_common_game_folders:
+        folders += common_game_folders()
+    unique, seen = [], set()
+    for folder in folders:
+        key = str(folder).rstrip("\\/").lower()
+        if key not in seen and folder.is_dir():
+            seen.add(key)
+            unique.append(folder)
+    return unique
+
+
 def scan_game_folders(config: Config) -> List[GameDir]:
     games: List[GameDir] = []
-    for folder in config.game_folders:
-        path = Path(os.path.expandvars(folder))
-        if path.is_dir():
-            games.extend(scan_game_folder(path))
+    for folder in game_folder_list(config):
+        games.extend(scan_game_folder(folder))
     return games
