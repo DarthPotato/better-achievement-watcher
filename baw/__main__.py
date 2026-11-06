@@ -71,7 +71,7 @@ def cmd_doctor(config: Config) -> int:
 
         state = gog_setup.status()
         print(f"\nGOG games: service {'installed' if state.service else 'MISSING'}, "
-              f"GOG peer {'downloaded' if state.peer else 'MISSING'}")
+              f"GOG peer {'downloaded' if state.peer else 'MISSING'}\n  log: {gog.log_path()}")
         for library in game_folder_list(config):
             for folder in gog.find_game_folders(library):
                 meta = gog.read_info(folder) or {}

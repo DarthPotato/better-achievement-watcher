@@ -132,29 +132,43 @@ def install_service() -> bool:
     staging = data_dir() / "galaxy" / "GalaxyCommunication.exe"
     staging.parent.mkdir(parents=True, exist_ok=True)
     staging.write_bytes(_dummy_exe())
-    script = "\n".join([
-        "$ErrorActionPreference = 'Stop'",
+    _run_elevated("install", [
         f"New-Item -ItemType Directory -Force -Path '{SERVICE_EXE.parent}' | Out-Null",
         f"Copy-Item -Force -LiteralPath '{staging}' -Destination '{SERVICE_EXE}'",
         f"& sc.exe create {SERVICE_NAME} binPath= '\"{SERVICE_EXE}\"' start= demand | Out-Null",
         f"& sc.exe sdset {SERVICE_NAME} '{SERVICE_SDDL}' | Out-Null",
     ])
-    script_path = Path(tempfile.gettempdir()) / "baw-install-galaxy-service.ps1"
-    script_path.write_text(script, encoding="utf-8")
-    # Start-Process -Verb RunAs shows the UAC prompt; -Wait so we can check the result.
+    return service_installed()
+
+
+def uninstall_service() -> bool:
+    """Remove the service again (one UAC prompt). True when it's gone after."""
+    if not service_installed():
+        return True
+    _run_elevated("uninstall", [
+        f"& sc.exe stop {SERVICE_NAME} | Out-Null",
+        f"& sc.exe delete {SERVICE_NAME} | Out-Null",
+        f"Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath '{SERVICE_EXE}'",
+    ])
+    return not service_installed()
+
+
+def _run_elevated(name: str, commands) -> None:
+    """Run PowerShell commands as admin: Windows shows its UAC prompt, and we wait for it."""
+    script_path = Path(tempfile.gettempdir()) / f"baw-{name}-galaxy-service.ps1"
+    script_path.write_text("\n".join(["$ErrorActionPreference = 'Continue'", *commands]), encoding="utf-8")
     launcher = (f"Start-Process powershell -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList "
                 f"'-NoProfile','-ExecutionPolicy','Bypass','-File','\"{script_path}\"'")
     try:
         subprocess.run(["powershell", "-NoProfile", "-Command", launcher], creationflags=CREATE_NO_WINDOW,
                        timeout=300, capture_output=True)
     except (OSError, subprocess.SubprocessError):
-        pass
+        pass  # UAC declined or PowerShell missing: the caller checks the service afterwards
     finally:
         try:
             script_path.unlink()
         except OSError:
             pass
-    return service_installed()
 
 
 def setup() -> Status:

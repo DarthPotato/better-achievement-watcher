@@ -95,6 +95,8 @@ class Session:
     def _handle(self, header: pb.Fields, payload: bytes) -> None:
         sort, type_, oseq = pb.first(header, 1, 0), pb.first(header, 2, 0), pb.first(header, 4)
         fields = pb.decode(payload) if payload else {}
+        name = self.game.name if self.game else "?"
+        self.service.log(f"{name}: request sort={sort} type={type_}")
         result = self._answer(type_, fields) if sort == SORT else None
         if result is None:
             if oseq is not None:
@@ -108,7 +110,12 @@ class Session:
         if type_ == AUTH_INFO_REQUEST:
             client_id = pb.text(fields, 1)
             self.game = self.service.resolve(client_id, int(pb.first(fields, 5, 0) or 0))
-            self.service.log(f"{self.game.name if self.game else 'unknown game'} signed in ({client_id})")
+            if self.game:
+                self.service.log(f"{self.game.name} signed in ({client_id}): {len(self.game.aliases)} achievement "
+                                 f"keys, {len(self.game.stats)} stat keys")
+            else:
+                self.service.log(f"unknown game signed in (client {client_id}, pid {pb.first(fields, 5)}): "
+                                 "no keys to offer")
             # GOG's own service announces the overlay before answering sign-in.
             self._send(OVERLAY_STATE_CHANGE_NOTIFICATION, pb.uint(1, 3))
             return AUTH_INFO_RESPONSE, (pb.uint(2, 0) + pb.fixed64(3, LOCAL_USER_ID)
@@ -134,6 +141,8 @@ class Session:
                 canonical = self.game.aliases.get(key, key)
                 if gog.record_unlock(self.game.game_id, canonical, pb.first(fields, 2) or None):
                     self.service.log(f"{self.game.name}: unlocked {canonical}")
+            else:
+                self.service.log(f"unlock for unknown achievement id {pb.first(fields, 1)}")
             return UNLOCK_USER_ACHIEVEMENT_RESPONSE, b""
         if type_ == CLEAR_USER_ACHIEVEMENT_REQUEST:
             key = self.ids.get(pb.first(fields, 1, 0))
