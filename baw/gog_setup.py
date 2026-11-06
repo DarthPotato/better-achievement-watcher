@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import urllib.request
 import zipfile
 from dataclasses import dataclass
@@ -50,10 +51,18 @@ def peer_dir() -> Path:
     return data_dir() / "galaxy" / "peer"
 
 
+class DownloadError(Exception):
+    pass
+
+
 def _get(url: str, timeout: float = 60.0) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": f"BetterAchievementWatcher/{__version__}"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read()
+    except (OSError, ValueError) as exc:  # URLError, HTTPError, timeouts, SSL errors
+        reason = getattr(exc, "reason", exc)
+        raise DownloadError(f"couldn't download from {urllib.parse.urlparse(url).hostname}: {reason}") from exc
 
 
 def peer_installed() -> bool:

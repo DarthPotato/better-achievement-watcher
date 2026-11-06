@@ -535,10 +535,18 @@ class SettingsDialog:
         cfg = app.config
         win = self.win = tk.Toplevel(app.root)
         win.title("Settings")
-        win.geometry("680x680")
         win.transient(app.root)
-        body = ttk.Frame(win, padding=10)
-        body.pack(fill="both", expand=True)
+        # The options scroll; the Save/Cancel row below them always stays visible.
+        self._canvas = canvas = tk.Canvas(win, highlightthickness=0, borderwidth=0)
+        scroll = ttk.Scrollbar(win, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        body = ttk.Frame(canvas, padding=10)
+        canvas.create_window((0, 0), window=body, anchor="nw", tags="body")
+        body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure("body", width=e.width))
+        win.bind("<MouseWheel>", lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"))
 
         self.game_folders = self._folder_list(
             body, "Game folders (searched for steam_api.dll, local saves and steam_settings)", cfg.game_folders)
@@ -586,7 +594,7 @@ class SettingsDialog:
         ttk.Checkbutton(body, text="Keep watching when the window is closed", variable=self.keep).pack(anchor="w")
         if startup.supported():
             ttk.Checkbutton(body, text="Start with Windows (in the background)", variable=self.autostart).pack(anchor="w")
-        ttk.Checkbutton(body, text="Check for updates at startup", variable=self.check_updates).pack(anchor="w")
+        ttk.Checkbutton(body, text="Check for updates", variable=self.check_updates).pack(anchor="w")
         if startup.supported():
             ttk.Checkbutton(body, text="Track GOG games (no GOG account needed; one admin prompt to set up)",
                             variable=self.gog).pack(anchor="w")
@@ -603,11 +611,16 @@ class SettingsDialog:
         info.configure(state="disabled")
         info.pack(fill="both", expand=True)
 
-        buttons = ttk.Frame(body)
-        buttons.pack(fill="x", pady=(8, 0))
+        buttons = ttk.Frame(win, padding=(10, 6))
+        buttons.pack(side="bottom", fill="x", before=scroll)
         ttk.Button(buttons, text="Save", command=self.save).pack(side="right")
         ttk.Button(buttons, text="Cancel", command=win.destroy).pack(side="right", padx=6)
         ttk.Button(buttons, text="Open data folder", command=self._open_data).pack(side="left")
+        # As tall as the options need, but never taller than the screen (minus the taskbar).
+        win.update_idletasks()
+        wanted = body.winfo_reqheight() + buttons.winfo_reqheight() + 4
+        height = min(wanted, win.winfo_screenheight() - int(120 * max(1.0, win.winfo_fpixels("1i") / 96.0)))
+        win.geometry(f"{max(680, body.winfo_reqwidth() + scroll.winfo_reqwidth())}x{height}")
 
     SOUND_LABELS = {"steam": "Steam achievement sound", "chime": "Built-in chime", "custom": "Custom .wav file"}
 

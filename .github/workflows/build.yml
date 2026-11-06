@@ -37,7 +37,7 @@ jobs:
           version="${TAG#v}"
           version="${version//[^A-Za-z0-9._-]/}"
           sed -i "s/^__version__ = .*/__version__ = \"${version}\"/" baw/__init__.py
-      - run: pip install pyinstaller Pillow
+      - run: pip install pyinstaller Pillow truststore
       - run: pyinstaller --noconfirm --onefile --windowed --name BetterAchievementWatcher BetterAchievementWatcher.pyw
       - uses: actions/upload-artifact@v4
         with:
