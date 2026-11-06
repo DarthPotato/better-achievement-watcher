@@ -116,8 +116,13 @@ def delete_later(path: Path, attempts: int = 30) -> None:
     for _ in range(attempts):
         try:
             path.unlink()
-            return
+            break
         except FileNotFoundError:
-            return
+            break
         except OSError:
             time.sleep(1.0)
+    if path.parent.name == "BetterAchievementWatcher-update":  # the updater's download folder
+        try:
+            path.parent.rmdir()  # only if empty
+        except OSError:
+            pass
