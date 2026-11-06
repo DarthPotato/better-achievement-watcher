@@ -431,7 +431,7 @@ class StartupTests(unittest.TestCase):
         with mock.patch.object(startup, "supported", return_value=True), \
                 mock.patch.object(startup.sys, "frozen", True, create=True), \
                 mock.patch.object(startup, "set_enabled", side_effect=calls.append):
-            with mock.patch.object(startup, "_registered_command", return_value='"Z:\gone\BAW.exe" --background'):
+            with mock.patch.object(startup, "_registered_command", return_value=r'"Z:\gone\BAW.exe" --background'):
                 startup.repair()
             with mock.patch.object(startup, "_registered_command", return_value=f'"{__file__}" --background'):
                 startup.repair()
@@ -611,3 +611,118 @@ class UpdateInstallTests(unittest.TestCase):
                               ("Dying Light - Platinum Edition", "Dying Light - Platinum Edition"),
                               ("R.E.P.O", "R.E.P.O"), ("Half-Life 2", "Half-Life 2"), ("GOG", "GOG")):
             self.assertEqual(display_name(folder), shown)
+
+
+class GogTests(unittest.TestCase):
+    def _fake_game(self, base: Path, keys=("CampaignStartedAchi", "SecretBossAchi", "SetAchi", "HexesTraveledStat")):
+        folder = base / "Alder's Blood Prologue"
+        write(folder / "goggame-2018305509.info", {"gameId": "2018305509", "clientId": "52573467997220792",
+                                                  "name": "Alder's Blood Prologue"})
+        write(folder / "Galaxy64.dll", "")
+        managed = folder / "Alder's Blood Prologue_Data" / "Managed"
+        managed.mkdir(parents=True)
+        (managed / "Assembly-CSharp.dll").write_bytes(b"\x00".join(k.encode() for k in keys) + b"\x00")
+        return folder
+
+    def test_key_matching(self):
+        from baw import gog
+
+        self.assertEqual(gog.norm("CampaignStartedAchi"), gog.norm("CampaignStarted"))
+        self.assertEqual(gog.norm("ACHIEVEMENT_1_CLEAR"), "1_clear")
+        self.assertNotEqual(gog.norm("A4_4"), gog.norm("A44"))
+        self.assertFalse(gog.looks_like_key("SetAchi"))
+        self.assertFalse(gog.looks_like_key("Achievement"))
+        self.assertTrue(gog.looks_like_key("SecretBossAchi"))
+        self.assertEqual(gog.display_from_key("BackstabsMadeAchi"), "Backstabs Made")
+        steam = GameSchema(820020, "Alder's Blood")
+        for key, title in (("CampaignStarted", "Save us"), ("CampaignFinished", "The last hunt")):
+            steam.achievements[key] = gog.AchievementInfo(key, title)
+        aliases, shown, info = gog.match_keys({"CampaignStartedAchi", "SecretBossAchi", "Unrelated"}, steam)
+        self.assertEqual(aliases["CampaignStartedAchi"], "CampaignStarted")
+        self.assertIn("CampaignFinished", aliases)  # Steam's own spelling is offered too
+        self.assertEqual(shown, ["CampaignStarted", "SecretBossAchi"])  # only what the game's files mention
+        self.assertEqual(info["SecretBossAchi"]["display_name"], "Secret Boss")
+
+    def test_find_and_build_game(self):
+        from baw import gog
+
+        base = Path(tempfile.mkdtemp(dir=TMP))
+        folder = self._fake_game(base)
+        write(base / "Old DOS game" / "goggame-1.info", {"gameId": "1", "clientId": "2", "name": "No SDK"})
+        self.assertEqual(gog.find_game_folders(base), [folder])
+        game = gog.build_game(folder, offline=True)
+        self.assertEqual((game.game_id, game.client_id), (2018305509, "52573467997220792"))
+        self.assertEqual(game.shown, ["CampaignStartedAchi", "SecretBossAchi"])
+        self.assertEqual(game.stats, ["HexesTraveledStat"])
+        self.assertEqual(gog.load_cached(game.game_id), game)
+        self.assertEqual(json.loads(gog.save_path(game.game_id).read_text()), {})  # listed before any unlock
+        self.assertTrue(gog.record_unlock(game.game_id, "SecretBossAchi", 1700000000))
+        self.assertFalse(gog.record_unlock(game.game_id, "SecretBossAchi"))
+        self.assertEqual(unlocked(parse_bytes(gog.save_path(game.game_id).read_bytes())), {"SecretBossAchi"})
+
+    def test_galaxy_service_end_to_end(self):
+        import socket
+
+        from baw import galaxy_proto as pb
+        from baw import gog
+        from baw.galaxy_service import GalaxyService
+
+        base = Path(tempfile.mkdtemp(dir=TMP))
+        game = gog.build_game(self._fake_game(base, keys=("FirstBloodAchi", "ShotsStat")), offline=True)
+        gog.reset(game.game_id)
+        service = GalaxyService(base / "peer", lambda client, pid: game if client == game.client_id else None,
+                                log=lambda m: None, port=0)
+        self.assertTrue(service.start())
+        try:
+            with socket.create_connection(("127.0.0.1", service.port), timeout=5) as conn:
+                def call(type_, payload, seq):
+                    header = pb.uint(1, 1) + pb.uint(2, type_) + pb.uint(3, len(payload)) + pb.uint(4, seq)
+                    conn.sendall(len(header).to_bytes(2, "big") + header + payload)
+                    buffer, replies = b"", []
+                    while not any(pb.first(h, 100) == seq for h, _ in replies):
+                        buffer += conn.recv(65536)
+                        frames, buffer = pb.split_frames(buffer)
+                        replies += frames
+                    return next((h, p) for h, p in replies if pb.first(h, 100) == seq)
+
+                header, payload = call(3, pb.string(1, game.client_id) + pb.uint(5, 1234), 1)
+                self.assertEqual(pb.first(header, 2), 4)  # AUTH_INFO_RESPONSE
+                self.assertEqual(pb.text(pb.decode(payload), 4), "Player")
+                _, payload = call(15, b"", 2)
+                stat = pb.decode(pb.decode(payload)[1][0])
+                self.assertEqual(pb.text(stat, 2), "ShotsStat")
+                _, payload = call(23, b"", 3)
+                entries = [pb.decode(e) for e in pb.decode(payload)[1]]
+                ids = {pb.text(e, 2): pb.first(e, 1) for e in entries}
+                self.assertIn("FirstBloodAchi", ids)
+                call(17, pb.fixed64(1, pb.first(stat, 1)) + pb.uint(2, 1) + pb.uint(4, 7), 4)
+                call(25, pb.fixed64(1, ids["FirstBloodAchi"]) + pb.fixed32(2, 1790000000), 5)
+                header, _ = call(99, b"", 6)
+                self.assertEqual(pb.first(header, 101), 501)  # unknown requests get "not implemented"
+        finally:
+            service.stop()
+        self.assertEqual(gog.unlocks(game.game_id), {"FirstBloodAchi": 1790000000})
+        self.assertEqual(gog.stat_values(game.game_id), {"ShotsStat": 7})
+
+    def test_peer_download_checks_hashes(self):
+        import hashlib
+        import io
+        import zipfile
+
+        from baw import gog_setup
+
+        dll = b"MZ fake peer"
+        packed = io.BytesIO()
+        with zipfile.ZipFile(packed, "w") as archive:
+            archive.writestr("GalaxyPeer64.dll", dll)
+        manifest = {"version": "1.2.3", "baseURI": "https://cdn/x", "files": [
+            {"path": "peer/msvc-18/GalaxyPeer64.dll", "resource": "r1", "sha256": hashlib.sha256(dll).hexdigest()}]}
+        responses = {gog_setup.PEER_MANIFEST: json.dumps(manifest).encode(), "https://cdn/x/r1": packed.getvalue()}
+        with mock.patch.object(gog_setup, "_get", side_effect=lambda url, timeout=60: responses[url]):
+            self.assertEqual(gog_setup.install_peer(), "1.2.3")
+            self.assertEqual((gog_setup.peer_dir() / "msvc-18" / "GalaxyPeer64.dll").read_bytes(), dll)
+            manifest["version"] = "1.2.4"
+            manifest["files"][0]["sha256"] = "0" * 64
+            responses[gog_setup.PEER_MANIFEST] = json.dumps(manifest).encode()
+            with self.assertRaises(ValueError):
+                gog_setup.install_peer()
