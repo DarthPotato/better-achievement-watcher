@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from .config import Config
-from . import native
+from . import gog, native
 from .parsers import AchievementState, parse_file
 from .scanner import SaveFile, scan_game_folders, scan_save_roots
 from .steam_local import STEAM_SOURCE, installed_appids, parse_steam_stats
@@ -97,6 +97,7 @@ class Watcher:
         self._last_rediscover = 0.0
         self._last_game_scan = 0.0
         self._steam_installed: Set[int] = set()
+        self.gog_games: Dict[str, gog.GogGame] = {}  # GOG client id -> game
 
     # ------------------------------------------------------------ state
 
@@ -143,9 +144,43 @@ class Watcher:
             if game.schema is not None:
                 self.store.register_fixed_schema(game.schema)
             saves.extend(game.saves)
+        if self.config.gog_enabled:
+            from .scanner import game_folder_list
+
+            for library in game_folder_list(self.config):
+                for folder in gog.find_game_folders(library):
+                    self._add_gog_game(folder)
         with self._lock:
             self._game_dir_saves = saves
         self._last_game_scan = time.monotonic()
+
+    def _steam_schema(self, appid: int):
+        schema = self.store.get(appid)
+        return schema if schema.achievements else None
+
+    def _add_gog_game(self, folder: Path) -> Optional[gog.GogGame]:
+        try:
+            game = gog.build_game(folder, self._steam_schema, offline=self.store.offline)
+        except Exception as exc:  # an odd game folder must not stop the scan
+            print(f"[gog] {folder}: {exc!r}")
+            return None
+        if game is not None:
+            self.store.register_fixed_schema(gog.to_schema(game))
+            with self._lock:
+                self.gog_games[game.client_id] = game
+        return game
+
+    def gog_game(self, client_id: str, pid: int) -> Optional[gog.GogGame]:
+        """The GOG game behind a Galaxy connection (also games outside the game folders)."""
+        with self._lock:
+            known = self.gog_games.get(client_id)
+        if known is not None:
+            return known
+        from .galaxy_service import exe_of_pid
+
+        exe = exe_of_pid(pid)
+        folder = gog.folder_for_exe(exe) if exe else None
+        return self._add_gog_game(folder) if folder else None
 
     def discover(self, notify: bool) -> None:
         saves = scan_save_roots(self.config) + self._game_dir_saves

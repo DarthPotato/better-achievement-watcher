@@ -58,6 +58,9 @@ class Config:
     sound_file: str = ""
     # Closing the window keeps watching in the background (run the app again to reopen it).
     keep_running_on_close: bool = True
+    # GOG games: the app stands in for GOG Galaxy on this PC so GOG games can unlock achievements
+    # without a GOG account. Needs a one-time setup (Settings), off by default.
+    gog_enabled: bool = False
     # Look for a newer release on GitHub at startup (exe builds only).
     check_updates: bool = True
     # Last release version a background popup was shown for, so it's announced only once.

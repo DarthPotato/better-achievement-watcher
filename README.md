@@ -87,6 +87,7 @@ Closing the window keeps the app watching. Use **Quit** to stop it.
 | Reloaded / 3DM | `%PROGRAMDATA%\Steam\<user>\<AppID>\stats\achievements.ini` |
 | Local saves | Anything under a game folder, next to `steam_api(64).dll` |
 | Games with their own achievement save | ReStory: `%USERPROFILE%\AppData\LocalLow\Mandragora\Restory\SaveData\achievements.slot*.restory` |
+| GOG games | Saved by the app itself, see [GOG games](#gog-games) |
 | Steam (owned games) | `Steam\appcache\stats\UserGameStats_<account>_<AppID>.bin` (viewer only) |
 | Anything else | Add it under **Extra save folders**, laid out as `<folder>\<AppID>\...` |
 
@@ -107,10 +108,25 @@ Not supported: SmartSteamEmu's binary `stats.bin`, and games whose emulator does
 achievements to disk at all. Some cracks ship without achievement support; there is
 nothing to watch for those.
 
-GOG games aren't covered: they don't use Steam's achievement system. Offline GOG
-installs don't record achievements anywhere, and games played through GOG Galaxy keep
-them in Galaxy's own database, which isn't read. A GOG game only shows up if it was set
-up with a Steam emulator.
+### GOG games
+
+GOG installers (without GOG Galaxy) can't record achievements on their own: GOG's SDK in the
+game wants to talk to Galaxy. With **Settings → Track GOG games** on, the app stands in for
+Galaxy on your PC. No GOG account, nothing is sent to GOG; unlocks are saved in
+`%APPDATA%\BetterAchievementWatcher\gog` and pop up like any other game.
+
+* Turning it on downloads GOG's helper library (`GalaxyPeer`, from GOG's own servers) and
+  registers a small idle Windows service called `GalaxyCommunication` (one admin prompt). The
+  game only connects once that service exists. To remove it later, in an admin PowerShell:
+  `sc.exe delete GalaxyCommunication; Remove-Item C:\ProgramData\GOG.com\Galaxy\redists\GalaxyCommunication.exe`
+* The app has to be running when you start the game (Start with Windows takes care of that).
+* Only games that ship GOG's SDK (`Galaxy.dll` / `Galaxy64.dll` in the game folder) can report
+  achievements. Older GOG releases without it have nothing to report, with or without Galaxy.
+* The game's achievement keys are read from its own files and matched to the Steam version for
+  names and icons. A key the app can't find can't unlock. Known not to work yet: Fallout: New
+  Vegas and other ports that go through GOG's Steam-to-Galaxy wrapper.
+* If GOG Galaxy itself is installed and running, it handles the game and the app stays out of
+  the way.
 
 ## Troubleshooting
 

@@ -3,7 +3,10 @@
 Goal: track achievements of standalone GOG installs (no Galaxy client, no GOG login) by having
 the app stand in for Galaxy locally. Tested on Windows 10, November 2026.
 
-**Status: works.** Alder's Blood Prologue (GOG, SDK 1.139) unlocked `CampaignStartedAchi`
+**Status: works, and is built into the app** (`baw/gog.py`, `baw/galaxy_service.py`, `baw/gog_setup.py`;
+Settings → Track GOG games). This folder keeps the research and the original prototype.
+
+First result: Alder's Blood Prologue (GOG, SDK 1.139) unlocked `CampaignStartedAchi`
 through `galaxy_standin.py` with no account and nothing sent to GOG. The game logged
 `stats and achievements retrieved`, `Achievement "CampaignStartedAchi" unlocked` and
 `OnUserStatsAndAchievementsStoreSuccess`; the stand-in received `UNLOCK_USER_ACHIEVEMENT_REQUEST`.

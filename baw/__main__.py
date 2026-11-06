@@ -66,6 +66,18 @@ def cmd_doctor(config: Config) -> int:
 
         for game, path in native.find_saves():
             print(f"  [found] {game.source:<16} {path}")
+    if config.gog_enabled:
+        from . import gog, gog_setup
+
+        state = gog_setup.status()
+        print(f"\nGOG games: service {'installed' if state.service else 'MISSING'}, "
+              f"GOG peer {'downloaded' if state.peer else 'MISSING'}")
+        for library in game_folder_list(config):
+            for folder in gog.find_game_folders(library):
+                meta = gog.read_info(folder) or {}
+                cached = gog.load_cached(int(meta.get("gameId", 0) or 0))
+                keys = f"{len(cached.shown)} achievements" if cached else "keys not worked out yet"
+                print(f"  {meta.get('name', folder.name)}  ({keys})  {folder}")
     steam = steam_install_dir()
     print(f"\nSteam: {steam or 'not found'}")
     if steam and config.include_steam_library:

@@ -11,7 +11,8 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Dict, List, Optional
 
-from . import APP_NAME, __version__, install, startup, update
+from . import APP_NAME, __version__, gog_setup, install, startup, update
+from .galaxy_service import GalaxyService
 from .config import Config
 from .notify import Notifier, PopupSpec, demo_spec, enable_dpi_awareness, load_icon
 from .parsers import AchievementState
@@ -26,7 +27,8 @@ from .watcher import GameProgress, Watcher
 FILTERS = {
     "All games": lambda emulators: True,
     "Steam": lambda emulators: STEAM_SOURCE in emulators,
-    "Emulators & other": lambda emulators: STEAM_SOURCE not in emulators,
+    "Emulators & other": lambda emulators: STEAM_SOURCE not in emulators and "GOG" not in emulators,
+    "GOG": lambda emulators: "GOG" in emulators,
 }
 
 INSTANCE_PORT = install.INSTANCE_PORT
@@ -70,6 +72,7 @@ class App:
         self._images: Dict[str, object] = {}
         self._schema_requested: set = set()
         self._listener: Optional[socket.socket] = None
+        self.galaxy: Optional[GalaxyService] = None
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         if background:
@@ -83,12 +86,15 @@ class App:
         threading.Thread(target=self._worker, name="worker", daemon=True).start()
         if install.running_exe() is not None and self.config.check_updates:
             self.work_queue.put(("update_check",))
+        if self.config.gog_enabled:
+            self.work_queue.put(("gog_check",))
         self.watcher.start()
         self.root.after(100, self._drain_ui_queue)
         self.root.mainloop()
 
     def quit(self) -> None:
         self.watcher.stop()
+        self.stop_gog()
         if self._listener:
             try:
                 self._listener.close()
@@ -162,6 +168,16 @@ class App:
                         self.ui_queue.put(("update", release))
                 elif kind == "update_download":
                     self._download_update(job[1])
+                elif kind == "gog_check":
+                    # Peer updates need no admin rights; the service is only set up from Settings.
+                    if not gog_setup.peer_installed():
+                        gog_setup.install_peer()
+                    self.ui_queue.put(("gog_status", gog_setup.status(), False))
+                elif kind == "gog_setup":
+                    try:
+                        self.ui_queue.put(("gog_status", gog_setup.setup(), True))
+                    except Exception as exc:
+                        self.ui_queue.put(("gog_failed", str(exc)))
             except Exception as exc:
                 print(f"[worker] {exc!r}")
 
@@ -212,6 +228,10 @@ class App:
                 elif kind == "quit":
                     self.quit()
                     return
+                elif kind == "gog_status":
+                    self._gog_status(event[1], event[2])
+                elif kind == "gog_failed":
+                    messagebox.showerror(APP_NAME, f"GOG setup failed: {event[1]}", parent=self.root)
                 elif kind == "update":
                     self._offer_update(event[1])
                 elif kind == "update_failed":
@@ -445,6 +465,32 @@ class App:
             self.ach_tree.insert("", "end", text=title, image=icon, values=(desc, when, rarity),
                                  tags=() if is_unlocked else ("locked",))
 
+    def start_gog(self) -> None:
+        if self.galaxy is None:
+            service = GalaxyService(gog_setup.peer_dir(), self.watcher.gog_game, log=lambda m: print(f"[gog] {m}"))
+            if service.start():
+                self.galaxy = service
+            else:
+                print("[gog] port 9977 is taken (GOG Galaxy running?); GOG games use that instead")
+
+    def stop_gog(self) -> None:
+        if self.galaxy is not None:
+            self.galaxy.stop()
+            self.galaxy = None
+
+    def _gog_status(self, status: "gog_setup.Status", after_setup: bool) -> None:
+        if status.ready:
+            self.start_gog()
+            if after_setup:
+                messagebox.showinfo(APP_NAME, "GOG games are set up. Start a GOG game while this app is "
+                                    "running and its achievements will pop up here.", parent=self.root)
+        elif after_setup and not status.service:
+            messagebox.showwarning(APP_NAME, "GOG games need a small Windows service, and it wasn't installed "
+                                   "(the admin prompt was declined?). Turn the option off and on in Settings "
+                                   "to try again.", parent=self.root)
+        else:
+            self.status.configure(text="GOG games: setup isn't finished - turn the option off and on in Settings.")
+
     def _offer_update(self, release: "update.Release") -> None:
         import webbrowser
 
@@ -503,6 +549,7 @@ class SettingsDialog:
         self.keep = tk.BooleanVar(value=cfg.keep_running_on_close)
         self.autostart = tk.BooleanVar(value=startup.is_enabled())
         self.check_updates = tk.BooleanVar(value=cfg.check_updates)
+        self.gog = tk.BooleanVar(value=cfg.gog_enabled)
         self.common = tk.BooleanVar(value=cfg.scan_common_game_folders)
         self.steam_library = tk.BooleanVar(value=cfg.include_steam_library)
         self.steam_uninstalled = tk.BooleanVar(value=cfg.include_uninstalled_steam)
@@ -532,6 +579,9 @@ class SettingsDialog:
         if startup.supported():
             ttk.Checkbutton(body, text="Start with Windows (in the background)", variable=self.autostart).pack(anchor="w")
         ttk.Checkbutton(body, text="Check for updates at startup", variable=self.check_updates).pack(anchor="w")
+        if startup.supported():
+            ttk.Checkbutton(body, text="Track GOG games (no GOG account needed; one admin prompt to set up)",
+                            variable=self.gog).pack(anchor="w")
 
         ttk.Label(body, text="Checked locations:").pack(anchor="w", pady=(8, 0))
         info = tk.Text(body, height=6, wrap="none", font=("Consolas", 9))
@@ -632,6 +682,11 @@ class SettingsDialog:
         cfg.scan_common_game_folders = self.common.get()
         cfg.include_steam_library = self.steam_library.get()
         cfg.check_updates = self.check_updates.get()
+        gog_was_on, cfg.gog_enabled = cfg.gog_enabled, self.gog.get()
+        if cfg.gog_enabled and not gog_was_on:
+            self.app.work_queue.put(("gog_setup",))
+        elif gog_was_on and not cfg.gog_enabled:
+            self.app.stop_gog()
         cfg.include_uninstalled_steam = self.steam_uninstalled.get()
         for key, value in self._sound_settings().items():
             setattr(cfg, key, value)

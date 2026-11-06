@@ -9,7 +9,7 @@ from typing import Dict, Iterator, List, Optional
 from .config import Config
 from .locations import SAVE_FILE_NAMES, SaveRoot, common_game_folders, default_roots, steam_install_dir
 from .steam_local import STEAM_SOURCE, stats_files
-from . import native, xbox
+from . import gog, native, xbox
 
 STEAM_API_DLLS = {"steam_api.dll", "steam_api64.dll"}
 SKIP_DIRS = {".git", "node_modules", "__pycache__", "$recycle.bin", "windows", "system volume information"}
@@ -101,6 +101,8 @@ def scan_root(root: SaveRoot) -> List[SaveFile]:
 def save_roots(config: Config) -> List[SaveRoot]:
     roots = default_roots() if config.scan_default_locations else []
     roots += [SaveRoot("Custom", Path(os.path.expandvars(p))) for p in config.extra_save_roots]
+    if config.gog_enabled:
+        roots.append(SaveRoot(gog.SOURCE, gog.saves_root()))
     return roots
 
 
