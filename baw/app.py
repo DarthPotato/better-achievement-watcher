@@ -32,6 +32,7 @@ FILTERS = {
 }
 
 INSTANCE_PORT = install.INSTANCE_PORT
+UPDATE_RECHECK_MS = 6 * 3600 * 1000
 BURST_LIMIT = 3  # individual popups per batch; the rest are summarised
 
 
@@ -84,8 +85,7 @@ class App:
         self._start_instance_server()
         startup.repair()
         threading.Thread(target=self._worker, name="worker", daemon=True).start()
-        if install.running_exe() is not None and self.config.check_updates:
-            self.work_queue.put(("update_check",))
+        self._schedule_update_check()
         if self.config.gog_enabled:
             self.work_queue.put(("gog_check",))
         self.watcher.start()
@@ -490,6 +490,14 @@ class App:
                                    "to try again.", parent=self.root)
         else:
             self.status.configure(text="GOG games: setup isn't finished - turn the option off and on in Settings.")
+
+    def _schedule_update_check(self) -> None:
+        """Check at start, then every few hours: the app often runs for days in the background."""
+        if install.running_exe() is None:  # running from source: nothing to update
+            return
+        if self.config.check_updates:
+            self.work_queue.put(("update_check",))
+        self.root.after(UPDATE_RECHECK_MS, self._schedule_update_check)
 
     def _offer_update(self, release: "update.Release") -> None:
         import webbrowser
