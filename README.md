@@ -120,11 +120,17 @@ Galaxy on your PC. No GOG account, nothing is sent to GOG; unlocks are saved in
   game only connects once that service exists. To remove it later, in an admin PowerShell:
   `sc.exe delete GalaxyCommunication; Remove-Item C:\ProgramData\GOG.com\Galaxy\redists\GalaxyCommunication.exe`
 * The app has to be running when you start the game (Start with Windows takes care of that).
+  If it isn't, GOG games wait 15-30 seconds on their splash screen looking for Galaxy, then
+  start without achievements.
 * Only games that ship GOG's SDK (`Galaxy.dll` / `Galaxy64.dll` in the game folder) can report
   achievements. Older GOG releases without it have nothing to report, with or without Galaxy.
 * The game's achievement keys are read from its own files and matched to the Steam version for
-  names and icons. A key the app can't find can't unlock. Known not to work yet: Fallout: New
-  Vegas and other ports that go through GOG's Steam-to-Galaxy wrapper.
+  names and icons. A key the app can't find can't unlock.
+* Tested: Alder's Blood Prologue and Fallout: New Vegas. Bethesda games such as Fallout don't
+  award achievements once you've used the console (`~`) in that save.
+* Some games wait for online features (leaderboards) that an offline sign-in can't give, and get
+  stuck while loading. Right-click such a game, **Don't track this game**, and it starts normally
+  without achievements. IRON NEST is set that way already.
 * If GOG Galaxy itself is installed and running, it handles the game and the app stays out of
   the way.
 

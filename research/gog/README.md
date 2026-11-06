@@ -52,9 +52,16 @@ which is why the earlier tests looked like the peer "never confirmed" anything.
 - Unity games that log (`output_log.txt` / `Player.log` in `LocalLow\<company>\<product>`) print
   every failed key, which is the quickest way to check a game.
 
-FNV and IRON NEST still fail; most likely the same key problem hidden behind their Steam
-wrappers (IRON NEST hangs at load because its wrapper waits for stats with `stats_on_init`).
-Not checked yet: whether their wrappers need the stat keys too.
+Steam-wrapper ports work too: FNV unlocked `A31` (its earlier "failures" were console use, which
+Bethesda games treat as cheating). IRON NEST gets "stats received" (Steam callback 1101) but calls
+`FindLeaderboard` at startup; GOG's peer rejects leaderboards without an online session (the wrapper
+returns handle 0) and the game waits forever on its disclaimer screen. Answering its sign-in with 401
+(what GOG does for unowned games) makes it start normally without achievements; the app does that for
+games in `Config.gog_untracked` (IRON NEST by default). Making leaderboards work would need the peer to
+believe it's online, i.e. reverse engineering.
+
+With the service installed but the app not running, GOG games wait 15-30 s on their splash screen:
+Comet's dummy service never reports RUNNING (it stays START_PENDING), so the SDK waits for Galaxy.
 
 ## Prototype
 

@@ -61,6 +61,9 @@ class Config:
     # GOG games: the app stands in for GOG Galaxy on this PC so GOG games can unlock achievements
     # without a GOG account. Needs a one-time setup (Settings), off by default.
     gog_enabled: bool = False
+    # GOG game ids the app doesn't answer for, so they run as without Galaxy (right-click a game to
+    # change it). IRON NEST waits forever for online leaderboards when it gets an offline sign-in.
+    gog_untracked: List[int] = field(default_factory=lambda: [1162687982])
     # Look for a newer release on GitHub at startup (exe builds only).
     check_updates: bool = True
     # Last release version a background popup was shown for, so it's announced only once.

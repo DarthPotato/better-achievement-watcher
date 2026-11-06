@@ -775,3 +775,33 @@ class GogMoreTests(unittest.TestCase):
         self.assertEqual(gog.stat_values(game.game_id), {})
         gog.log("hello")
         self.assertIn("hello", gog.log_path().read_text(encoding="utf-8"))
+
+
+class GogUntrackedTests(unittest.TestCase):
+    def test_untracked_game_is_refused(self):
+        import socket
+
+        from baw import galaxy_proto as pb
+        from baw import gog
+        from baw.galaxy_service import GalaxyService
+
+        self.assertIn(1162687982, Config().gog_untracked)  # IRON NEST is off by default
+        folder = Path(tempfile.mkdtemp(dir=TMP)) / "G"
+        write(folder / "goggame-77.info", {"gameId": "77", "clientId": "123", "name": "G"})
+        write(folder / "Galaxy64.dll", "")
+        game = gog.build_game(folder, offline=True)
+        service = GalaxyService(folder, lambda c, p: game, log=lambda m: None, port=0, tracked=lambda g: False)
+        self.assertTrue(service.start())
+        try:
+            with socket.create_connection(("127.0.0.1", service.port), timeout=5) as conn:
+                payload = pb.string(1, "123")
+                header = pb.uint(1, 1) + pb.uint(2, 3) + pb.uint(3, len(payload)) + pb.uint(4, 1)
+                conn.sendall(len(header).to_bytes(2, "big") + header + payload)
+                buffer, frames = b"", []
+                while not frames:
+                    buffer += conn.recv(4096)
+                    frames, buffer = pb.split_frames(buffer)
+        finally:
+            service.stop()
+        header, _ = frames[0]
+        self.assertEqual((pb.first(header, 2), pb.first(header, 101)), (4, 401))  # sign-in refused
