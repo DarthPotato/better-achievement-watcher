@@ -839,3 +839,53 @@ class EpicEmulatorTests(unittest.TestCase):
         self.assertEqual(len(game.unlocked), 1)
         schema = store.get(game.appid)
         self.assertEqual((schema.title, schema.info("ACH_WIN").title), ("Fall Guys", "Winner"))
+
+
+class BuildTests(unittest.TestCase):
+    def test_app_does_not_import_what_the_exe_leaves_out(self):
+        import ast
+        import importlib.util as iu
+
+        spec = iu.spec_from_file_location("build_exe", Path(__file__).resolve().parent.parent / "tools" / "build_exe.py")
+        build = iu.module_from_spec(spec)
+        spec.loader.exec_module(build)
+        excluded = set(build.EXCLUDE)
+        for source in (Path(__file__).resolve().parent.parent / "baw").glob("*.py"):
+            for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+                names = []
+                if isinstance(node, ast.Import):
+                    names = [a.name for a in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                    names = [node.module] + [f"{node.module}.{a.name}" for a in node.names]
+                for name in names:
+                    parts = name.split(".")
+                    hits = {".".join(parts[:i]) for i in range(1, len(parts) + 1)} & excluded
+                    self.assertFalse(hits, f"{source.name} imports {name}, which tools/build_exe.py excludes")
+
+
+class ReviewFixTests(unittest.TestCase):
+    def test_gog_game_without_steam_twin_is_retried_daily(self):
+        from baw import gog
+
+        folder = Path(tempfile.mkdtemp(dir=TMP)) / "Some GOG Game"
+        write(folder / "goggame-4242.info", {"gameId": "4242", "clientId": "99", "name": "Some GOG Game"})
+        write(folder / "Galaxy64.dll", "")
+        first = gog.build_game(folder, offline=True)
+        self.assertEqual(first.steam_appid, 0)
+        lookups = []
+        steam = GameSchema(5, "Some GOG Game")
+        steam.achievements["WIN"] = gog.AchievementInfo("WIN", "Winner")
+        with mock.patch.object(gog, "steam_appid_for", return_value=5):
+            gog.build_game(folder, lambda appid: lookups.append(appid) or steam)  # cached, too recent
+            self.assertEqual(lookups, [])
+            with mock.patch.object(gog.time, "time", return_value=first.built + gog.RETRY_STEAM_AFTER + 1):
+                again = gog.build_game(folder, lambda appid: lookups.append(appid) or steam)
+        self.assertEqual((lookups, again.steam_appid), ([5], 5))
+
+    def test_update_download_folder_is_removed(self):
+        from baw import install
+
+        folder = Path(tempfile.mkdtemp(dir=TMP)) / "BetterAchievementWatcher-update"
+        exe = write(folder / "BetterAchievementWatcher.exe", "x")
+        install.delete_later(exe)
+        self.assertFalse(folder.exists())

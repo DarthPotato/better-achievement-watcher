@@ -20,7 +20,6 @@ import urllib.request
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from . import __version__
 from .config import data_dir

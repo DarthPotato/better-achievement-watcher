@@ -34,6 +34,7 @@ _IDENT16 = re.compile(rb"(?:[A-Za-z0-9_]\x00){4,64}")
 ACH_PATTERN = re.compile(r"^(?:ACH|ACHIEVEMENT|Achievement|ach)_|(?:Achi|Achievement|_ACH|_ACHIEVEMENT)$")
 STAT_PATTERN = re.compile(r"(?:Stat|_STAT|_stat)$|^(?:STAT|stat)_")
 MAX_SCAN_BYTES = 400 * 1024 * 1024
+RETRY_STEAM_AFTER = 24 * 3600
 _lock = threading.RLock()
 
 SteamLookup = Callable[[int], Optional[GameSchema]]
@@ -56,6 +57,7 @@ class GogGame:
     stats: List[str] = field(default_factory=list)
     info: Dict[str, dict] = field(default_factory=dict)  # canonical key -> AchievementInfo fields
     version: int = CACHE_VERSION
+    built: float = 0.0  # when the keys were worked out (unix time)
 
 
 # ---------------------------------------------------------------- paths
@@ -321,14 +323,17 @@ def build_game(folder: Path, steam_lookup: Optional[SteamLookup] = None, offline
     game_id = int(meta["gameId"])
     cached = load_cached(game_id)
     if cached is not None and Path(cached.folder) == folder:
-        return cached
+        # Without a Steam twin the names may come from a lookup that failed (offline):
+        # try again once a day instead of keeping raw keys for good.
+        if cached.steam_appid or offline or time.time() - cached.built < RETRY_STEAM_AFTER:
+            return cached
     name = str(meta.get("name") or folder.name)
     idents = identifiers(folder)
     appid = steam_appid_for(name, folder, offline)
     steam = steam_lookup(appid) if appid and steam_lookup else None
     aliases, shown, info = match_keys(idents, steam)
     game = GogGame(game_id, str(meta["clientId"]), name, str(folder), appid if steam else 0,
-                   aliases, shown, stat_keys(idents), info)
+                   aliases, shown, stat_keys(idents), info, built=time.time())
     try:
         game_dir(game_id).mkdir(parents=True, exist_ok=True)
         cache_path(game_id).write_text(json.dumps(asdict(game), indent=1), encoding="utf-8")
