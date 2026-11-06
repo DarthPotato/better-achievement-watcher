@@ -34,9 +34,11 @@ DELETE_USER_ACHIEVEMENTS_REQUEST, DELETE_USER_ACHIEVEMENTS_RESPONSE = 29, 30
 GET_USER_TIME_PLAYED_REQUEST, GET_USER_TIME_PLAYED_RESPONSE = 43, 44
 OVERLAY_STATE_CHANGE_NOTIFICATION = 58
 NOT_IMPLEMENTED = 501
+UNAUTHORIZED = 401  # what GOG answers for a game the account doesn't own; the game then runs offline
 VALUE_TYPE_INT, VALUE_TYPE_FLOAT = 1, 2
 
 GameResolver = Callable[[str, int], Optional[gog.GogGame]]
+TrackedCheck = Callable[[gog.GogGame], bool]
 
 
 def exe_of_pid(pid: int) -> Optional[Path]:
@@ -98,6 +100,9 @@ class Session:
         name = self.game.name if self.game else "?"
         self.service.log(f"{name}: request sort={sort} type={type_}")
         result = self._answer(type_, fields) if sort == SORT else None
+        if result == UNAUTHORIZED:
+            self._send(type_ + 1, rseq=oseq, code=UNAUTHORIZED)
+            return
         if result is None:
             if oseq is not None:
                 self._send(type_ + 1, rseq=oseq, code=NOT_IMPLEMENTED)
@@ -110,6 +115,10 @@ class Session:
         if type_ == AUTH_INFO_REQUEST:
             client_id = pb.text(fields, 1)
             self.game = self.service.resolve(client_id, int(pb.first(fields, 5, 0) or 0))
+            if self.game and not self.service.tracked(self.game):
+                self.service.log(f"{self.game.name} isn't tracked: refused its sign-in so it runs without Galaxy")
+                self.game = None
+                return UNAUTHORIZED
             if self.game:
                 self.service.log(f"{self.game.name} signed in ({client_id}): {len(self.game.aliases)} achievement "
                                  f"keys, {len(self.game.stats)} stat keys")
@@ -192,7 +201,9 @@ class Session:
 
 
 class GalaxyService:
-    def __init__(self, peer_dir: Path, resolver: GameResolver, log: Callable[[str], None] = print, port: int = PORT):
+    def __init__(self, peer_dir: Path, resolver: GameResolver, log: Callable[[str], None] = print, port: int = PORT,
+                 tracked: Optional[TrackedCheck] = None):
+        self.tracked = tracked or (lambda game: True)
         self.port = port
         self.peer_dir = peer_dir
         self.resolver = resolver

@@ -399,6 +399,10 @@ class App:
                 menu.add_command(label="Hide game", command=lambda: self.set_hidden(appid, True))
             game = self.games.get(appid)
             if game and any(s.emulator == gog.SOURCE for s in game.sources):
+                if appid in self.config.gog_untracked:
+                    menu.add_command(label="Track this game", command=lambda: self.set_gog_tracked(appid, True))
+                else:
+                    menu.add_command(label="Don't track this game", command=lambda: self.set_gog_tracked(appid, False))
                 menu.add_command(label="Reset achievements...", command=lambda: self.reset_gog_game(appid))
             menu.add_separator()
         menu.add_checkbutton(label="Show hidden games", variable=self.show_hidden, command=self.refresh)
@@ -406,6 +410,13 @@ class App:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+
+    def set_gog_tracked(self, appid: int, tracked: bool) -> None:
+        """Untracked GOG games get no Galaxy sign-in, so they run as if Galaxy wasn't there."""
+        ids = [i for i in self.config.gog_untracked if i != appid]
+        self.config.gog_untracked = ids if tracked else ids + [appid]
+        self.config.save()
+        self.refresh()
 
     def reset_gog_game(self, appid: int) -> None:
         title = self._schema(appid).title
@@ -463,6 +474,8 @@ class App:
         emulators = sorted({s.emulator for s in game.sources})
         self.game_meta.configure(text=f"AppID {appid}  •  {len(unlocked)} of {total} unlocked  •  "
                                       f"{', '.join(emulators)}  •  names from {schema.source or 'save file'}")
+        if appid in self.config.gog_untracked and any(s.emulator == gog.SOURCE for s in game.sources):
+            self.game_meta.configure(text=self.game_meta.cget("text") + "  \u2022  not tracked (right-click to change)")
         if borrowed_from:
             recorded = (f"{len(unlocked)} of {total} achievements recorded in the save are shown by their raw names."
                         if total else "Its save hasn't recorded any achievements.")
@@ -487,7 +500,8 @@ class App:
 
     def start_gog(self) -> None:
         if self.galaxy is None:
-            service = GalaxyService(gog_setup.peer_dir(), self.watcher.gog_game, log=gog.log)
+            service = GalaxyService(gog_setup.peer_dir(), self.watcher.gog_game, log=gog.log,
+                                    tracked=lambda game: game.game_id not in self.config.gog_untracked)
             if service.start():
                 self.galaxy = service
             else:
