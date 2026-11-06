@@ -75,6 +75,7 @@ class App:
         self._schema_requested: set = set()
         self._listener: Optional[socket.socket] = None
         self.galaxy: Optional[GalaxyService] = None
+        self.gog_port_taken = False
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         if background:
@@ -176,6 +177,8 @@ class App:
                     self.ui_queue.put(("gog_status", gog_setup.status(), False))
                 elif kind == "gog_remove":
                     removed = gog_setup.uninstall_service()
+                    if removed:
+                        gog_setup.remove_peer()
                     self.ui_queue.put(("gog_removed", removed))
                 elif kind == "gog_setup":
                     try:
@@ -507,8 +510,24 @@ class App:
                                     tracked=lambda game: game.game_id not in self.config.gog_untracked)
             if service.start():
                 self.galaxy = service
+                self.gog_port_taken = False
             else:
-                print("[gog] port 9977 is taken (GOG Galaxy running?); GOG games use that instead")
+                self.gog_port_taken = True  # GOG Galaxy itself runs: games use that
+                gog.log("port 9977 is taken (GOG Galaxy running?); GOG games use that instead")
+
+    def gog_state(self) -> "tuple":
+        """(text, colour) for the GOG status shown next to the setting."""
+        if self.galaxy is not None:
+            return "\u25cf Active", "#1a7f37"
+        if self.gog_port_taken:
+            return "\u25cf GOG Galaxy is handling GOG games", "#1a7f37"
+        status = gog_setup.status()
+        if not self.config.gog_enabled:
+            return ("\u25cb Off (service still installed)" if status.service else "\u25cb Off"), "#777"
+        if not status.ready:
+            missing = "service" if not status.service else "GOG helper"
+            return f"\u25cf Not set up ({missing} missing): turn the option off and on", "#b35900"
+        return "\u25cf Set up, starting...", "#b35900"
 
     def stop_gog(self) -> None:
         if self.galaxy is not None:
@@ -700,8 +719,12 @@ class SettingsDialog:
             ttk.Checkbutton(body, text="Start with Windows (in the background)", variable=self.autostart).pack(anchor="w")
         ttk.Checkbutton(body, text="Check for updates", variable=self.check_updates).pack(anchor="w")
         if startup.supported():
-            ttk.Checkbutton(body, text="Track GOG games (no GOG account needed; one admin prompt to set up)",
-                            variable=self.gog).pack(anchor="w")
+            gog_row = ttk.Frame(body)
+            gog_row.pack(anchor="w", fill="x")
+            ttk.Checkbutton(gog_row, text="Track GOG games (no GOG account needed)",
+                            variable=self.gog).pack(side="left")
+            state, colour = app.gog_state()
+            ttk.Label(gog_row, text=state, foreground=colour).pack(side="left", padx=(8, 0))
 
         ttk.Label(body, text="Checked locations:").pack(anchor="w", pady=(8, 0))
         info = tk.Text(body, height=6, wrap="none", font=("Consolas", 9))

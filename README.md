@@ -87,6 +87,7 @@ Closing the window keeps the app watching. Use **Quit** to stop it.
 | Reloaded / 3DM | `%PROGRAMDATA%\Steam\<user>\<AppID>\stats\achievements.ini` |
 | Local saves | Anything under a game folder, next to `steam_api(64).dll` |
 | Games with their own achievement save | ReStory: `%USERPROFILE%\AppData\LocalLow\Mandragora\Restory\SaveData\achievements.slot*.restory` |
+| Epic emulator (Nemirtingas) | `%APPDATA%\NemirtingasEpicEmu\...\achievements.json` (names from `achievements_db.json` next to it) |
 | GOG games | Saved by the app itself, see [GOG games](#gog-games) |
 | Steam (owned games) | `Steam\appcache\stats\UserGameStats_<account>_<AppID>.bin` (viewer only) |
 | Anything else | Add it under **Extra save folders**, laid out as `<folder>\<AppID>\...` |
@@ -117,7 +118,9 @@ Galaxy on your PC. No GOG account, nothing is sent to GOG; unlocks are saved in
 
 * Turning it on downloads GOG's helper library (`GalaxyPeer`, from GOG's own servers) and
   registers a small idle Windows service called `GalaxyCommunication` (one admin prompt). The
-  game only connects once that service exists. To remove it later, in an admin PowerShell:
+  game only connects once that service exists. Settings shows whether it's active. To remove
+  it again, untick the option: the app offers to remove the service (one admin prompt) and its
+  downloaded files. By hand, in an admin PowerShell:
   `sc.exe delete GalaxyCommunication; Remove-Item C:\ProgramData\GOG.com\Galaxy\redists\GalaxyCommunication.exe`
 * The app has to be running when you start the game (Start with Windows takes care of that).
   If it isn't, GOG games wait 15-30 seconds on their splash screen looking for Galaxy, then
