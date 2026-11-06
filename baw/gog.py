@@ -88,9 +88,25 @@ def read_info(folder: Path) -> Optional[dict]:
             data = json.loads(info.read_text(encoding="utf-8-sig", errors="replace"))
         except (OSError, ValueError):
             continue
-        if isinstance(data, dict) and data.get("gameId") and data.get("clientId"):
+        if not isinstance(data, dict) or not data.get("gameId"):
+            continue
+        if not data.get("clientId"):
+            # Ports that go through GOG's Steam wrapper keep it in GalaxyConfig.json (IRON NEST).
+            data["clientId"] = _galaxy_config(folder).get("client_id")
+        if data.get("clientId"):
             return data
     return None
+
+
+def _galaxy_config(folder: Path) -> dict:
+    for config in [folder / "GalaxyConfig.json", *folder.glob("*_Data/GalaxyConfig.json")]:
+        try:
+            data = json.loads(config.read_text(encoding="utf-8-sig"))
+            if isinstance(data, dict):
+                return data
+        except (OSError, ValueError):
+            continue
+    return {}
 
 
 def has_galaxy_sdk(folder: Path, max_depth: int = 4) -> bool:
@@ -252,13 +268,9 @@ def stat_keys(idents: Iterable[str], limit: int = 500) -> List[str]:
 # ---------------------------------------------------------------- Steam twin
 
 def _steam_appid_in_folder(folder: Path) -> int:
-    for config in [folder / "GalaxyConfig.json", *folder.glob("*_Data/GalaxyConfig.json")]:
-        try:
-            value = json.loads(config.read_text(encoding="utf-8-sig")).get("steam_appid")
-            if str(value).isdigit():
-                return int(value)
-        except (OSError, ValueError, AttributeError):
-            continue
+    value = _galaxy_config(folder).get("steam_appid")
+    if str(value).isdigit():
+        return int(value)
     for txt in (folder / "steam_appid.txt",):
         try:
             words = txt.read_text(encoding="utf-8", errors="replace").split()
@@ -395,9 +407,28 @@ def set_stat(game_id: int, key: str, value: float) -> None:
 
 
 def reset(game_id: int) -> None:
+    """Forget a game's unlocks and stats (it stays listed, at 0)."""
     with _lock:
-        for path in (save_path(game_id), stats_path(game_id)):
-            try:
-                path.unlink()
-            except OSError:
-                pass
+        try:
+            stats_path(game_id).unlink()
+        except OSError:
+            pass
+        _write_json(save_path(game_id), {})
+
+
+def log_path() -> Path:
+    return saves_root() / "galaxy.log"
+
+
+def log(message: str) -> None:
+    """What GOG games do, for troubleshooting (kept small)."""
+    with _lock:
+        path = log_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists() and path.stat().st_size > 512 * 1024:
+                path.replace(path.with_suffix(".old.log"))
+            with open(path, "a", encoding="utf-8") as out:
+                out.write(time.strftime("%Y-%m-%d %H:%M:%S ") + message + "\n")
+        except OSError:
+            pass

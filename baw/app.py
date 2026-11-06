@@ -11,7 +11,8 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Dict, List, Optional
 
-from . import APP_NAME, __version__, gog_setup, install, startup, update
+from . import APP_NAME, __version__, gog, gog_setup, install, startup, update
+from .winicon import shield_image
 from .galaxy_service import GalaxyService
 from .config import Config
 from .notify import Notifier, PopupSpec, demo_spec, enable_dpi_awareness, load_icon
@@ -173,6 +174,9 @@ class App:
                     if not gog_setup.peer_installed():
                         gog_setup.install_peer()
                     self.ui_queue.put(("gog_status", gog_setup.status(), False))
+                elif kind == "gog_remove":
+                    removed = gog_setup.uninstall_service()
+                    self.ui_queue.put(("gog_removed", removed))
                 elif kind == "gog_setup":
                     try:
                         self.ui_queue.put(("gog_status", gog_setup.setup(), True))
@@ -230,6 +234,13 @@ class App:
                     return
                 elif kind == "gog_status":
                     self._gog_status(event[1], event[2])
+                elif kind == "gog_removed":
+                    if event[1]:
+                        messagebox.showinfo(APP_NAME, "The GalaxyCommunication service was removed.", parent=self.root)
+                    else:
+                        messagebox.showwarning(APP_NAME, "The service is still there (the admin prompt was "
+                                               "declined?). To remove it by hand, in an admin PowerShell:\n\n"
+                                               + gog_setup.uninstall_command(), parent=self.root)
                 elif kind == "gog_failed":
                     messagebox.showerror(APP_NAME, f"GOG setup failed: {event[1]}", parent=self.root)
                 elif kind == "update":
@@ -386,12 +397,21 @@ class App:
                 menu.add_command(label="Unhide game", command=lambda: self.set_hidden(appid, False))
             else:
                 menu.add_command(label="Hide game", command=lambda: self.set_hidden(appid, True))
+            game = self.games.get(appid)
+            if game and any(s.emulator == gog.SOURCE for s in game.sources):
+                menu.add_command(label="Reset achievements...", command=lambda: self.reset_gog_game(appid))
             menu.add_separator()
         menu.add_checkbutton(label="Show hidden games", variable=self.show_hidden, command=self.refresh)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+
+    def reset_gog_game(self, appid: int) -> None:
+        title = self._schema(appid).title
+        if messagebox.askyesno(APP_NAME, f"Reset all achievements of {title}?\n\nThe game reports them again "
+                               "when you earn them next time. This only affects this app.", parent=self.root):
+            gog.reset(appid)
 
     def set_hidden(self, appid: int, hidden: bool) -> None:
         games = [a for a in self.config.hidden_games if a != appid]
@@ -467,7 +487,7 @@ class App:
 
     def start_gog(self) -> None:
         if self.galaxy is None:
-            service = GalaxyService(gog_setup.peer_dir(), self.watcher.gog_game, log=lambda m: print(f"[gog] {m}"))
+            service = GalaxyService(gog_setup.peer_dir(), self.watcher.gog_game, log=gog.log)
             if service.start():
                 self.galaxy = service
             else:
@@ -527,6 +547,65 @@ class App:
 
     def open_settings(self) -> None:
         SettingsDialog(self)
+
+
+GOG_SETUP_TEXT = (
+    "To track GOG games, the app stands in for GOG Galaxy on this PC. Windows will ask for "
+    "administrator permission once, because one step changes Windows' list of services.\n\n"
+    "What happens:\n"
+    "  \u2022  GOG's helper library (GalaxyPeer) is downloaded from GOG's servers into this app's "
+    "data folder. GOG games load it to talk to Galaxy.\n"
+    "  \u2022  A small Windows service called GalaxyCommunication is registered (this is the admin "
+    "step). It does nothing by itself: GOG games only look for it before they connect. It's the "
+    "dummy service from the open-source Comet project, checked against a known checksum.\n\n"
+    "No GOG account is used and nothing is sent to GOG. Turning the option off later offers to "
+    "remove the service again."
+)
+
+
+def _shield_dialog(parent, title: str, text: str, action: str) -> bool:
+    """A yes/no dialog whose action button carries Windows' admin shield."""
+    win = tk.Toplevel(parent)
+    win.title(title)
+    win.transient(parent)
+    win.resizable(False, False)
+    body = ttk.Frame(win, padding=14)
+    body.pack(fill="both", expand=True)
+    big = shield_image(32)
+    if big is not None:
+        ttk.Label(body, image=big).grid(row=0, column=0, sticky="n", padx=(0, 12))
+    ttk.Label(body, text=text, wraplength=440, justify="left").grid(row=0, column=1, sticky="w")
+    buttons = ttk.Frame(body)
+    buttons.grid(row=1, column=0, columnspan=2, sticky="e", pady=(14, 0))
+    answer = {"ok": False}
+
+    def choose(value: bool) -> None:
+        answer["ok"] = value
+        win.destroy()
+
+    small = shield_image(16)
+    go = ttk.Button(buttons, text=action, command=lambda: choose(True))
+    if small is not None:
+        go.configure(image=small, compound="left")
+    go.pack(side="right")
+    ttk.Button(buttons, text="Cancel", command=lambda: choose(False)).pack(side="right", padx=6)
+    win._images = (big, small)  # keep references so Tk doesn't drop them
+    win.protocol("WM_DELETE_WINDOW", lambda: choose(False))
+    win.grab_set()
+    go.focus_set()
+    parent.wait_window(win)
+    return answer["ok"]
+
+
+def confirm_gog_setup(parent) -> bool:
+    return _shield_dialog(parent, "Set up GOG games", GOG_SETUP_TEXT, "Continue")
+
+
+def confirm_gog_removal(parent) -> bool:
+    return _shield_dialog(parent, "Remove GOG games setup",
+                          "Also remove the GalaxyCommunication service from Windows? This needs "
+                          "administrator permission again. Your GOG achievements in this app are kept.",
+                          "Remove service")
 
 
 class SettingsDialog:
@@ -705,9 +784,14 @@ class SettingsDialog:
         cfg.check_updates = self.check_updates.get()
         gog_was_on, cfg.gog_enabled = cfg.gog_enabled, self.gog.get()
         if cfg.gog_enabled and not gog_was_on:
-            self.app.work_queue.put(("gog_setup",))
+            if gog_setup.service_installed() or confirm_gog_setup(self.win):
+                self.app.work_queue.put(("gog_setup",))
+            else:
+                cfg.gog_enabled = False
         elif gog_was_on and not cfg.gog_enabled:
             self.app.stop_gog()
+            if gog_setup.service_installed() and confirm_gog_removal(self.win):
+                self.app.work_queue.put(("gog_remove",))
         cfg.include_uninstalled_steam = self.steam_uninstalled.get()
         for key, value in self._sound_settings().items():
             setattr(cfg, key, value)

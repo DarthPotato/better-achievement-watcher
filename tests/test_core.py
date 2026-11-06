@@ -755,3 +755,23 @@ class UpdateRecheckTests(unittest.TestCase):
             self.assertEqual(scheduled, [])
         finally:
             app.root.destroy()
+
+
+class GogMoreTests(unittest.TestCase):
+    def test_client_id_from_galaxy_config_and_reset(self):
+        from baw import gog
+
+        folder = Path(tempfile.mkdtemp(dir=TMP)) / "IRON NEST"
+        write(folder / "goggame-1162687982.info", {"gameId": "1162687982", "clientId": None, "name": "IRON NEST"})
+        write(folder / "Iron Nest_Data" / "Plugins" / "x86_64" / "Galaxy64.dll", "")
+        write(folder / "GalaxyConfig.json", {"client_id": "59627447589917714", "steam_appid": 2950790})
+        self.assertEqual(gog.read_info(folder)["clientId"], "59627447589917714")
+        self.assertEqual(gog._steam_appid_in_folder(folder), 2950790)
+        game = gog.build_game(folder, offline=True)
+        gog.record_unlock(game.game_id, "X", 5)
+        gog.set_stat(game.game_id, "S", 3)
+        gog.reset(game.game_id)
+        self.assertEqual(json.loads(gog.save_path(game.game_id).read_text()), {})  # still listed, at 0
+        self.assertEqual(gog.stat_values(game.game_id), {})
+        gog.log("hello")
+        self.assertIn("hello", gog.log_path().read_text(encoding="utf-8"))
