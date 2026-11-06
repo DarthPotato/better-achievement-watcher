@@ -153,6 +153,13 @@ def uninstall_service() -> bool:
     return not service_installed()
 
 
+def remove_peer() -> None:
+    """Delete GOG's downloaded helper library (achievements recorded by the app are kept)."""
+    import shutil
+
+    shutil.rmtree(peer_dir(), ignore_errors=True)
+
+
 def _run_elevated(name: str, commands) -> None:
     """Run PowerShell commands as admin: Windows shows its UAC prompt, and we wait for it."""
     script_path = Path(tempfile.gettempdir()) / f"baw-{name}-galaxy-service.ps1"

@@ -805,3 +805,37 @@ class GogUntrackedTests(unittest.TestCase):
             service.stop()
         header, _ = frames[0]
         self.assertEqual((pb.first(header, 2), pb.first(header, 101)), (4, 401))  # sign-in refused
+
+
+class EpicEmulatorTests(unittest.TestCase):
+    def test_nemirtingas_saves(self):
+        from baw import epic
+
+        base = Path(tempfile.mkdtemp(dir=TMP))
+        folder = base / "Roaming" / "NemirtingasEpicEmu" / "Fall Guys" / "0123456789abcdef0123456789abcdef"
+        write(folder / "achievements_db.json", {
+            "ACH_WIN": {"achievement_id": "ACH_WIN", "unlocked_display_name": "Winner",
+                        "unlocked_description": "Win a show", "unlocked_icon_url": "https://x/win.png",
+                        "locked_icon_url": "https://x/win_l.png", "is_hidden": False},
+            "ACH_JUMP": {"achievement_id": "ACH_JUMP", "unlocked_display_name": "Jumper", "is_hidden": True}})
+        save = write(folder / "achievements.json", {
+            "ACH_WIN": {"achievement_id": "ACH_WIN", "progress": 1.0, "unlock_time": 1700000000},
+            "ACH_JUMP": {"achievement_id": "ACH_JUMP", "progress": 0.5, "unlock_time": -1}})
+        states = epic.parse(save)
+        self.assertEqual(unlocked(states), {"ACH_WIN"})
+        self.assertEqual(states["ACH_WIN"].unlock_time, 1700000000)
+        self.assertEqual(epic._unix_time(1700000000123), 1700000000)  # milliseconds
+        self.assertEqual(epic._unix_time(123456789), 0)  # a monotonic clock, not a date
+        self.assertEqual(epic.game_name(save), "Fall Guys")
+
+        config = Config(include_steam_library=False, scan_common_game_folders=False)
+        store = SchemaStore(config, offline=True)
+        env = {"APPDATA": str(base / "Roaming"), "LOCALAPPDATA": str(base / "L"), "PUBLIC": str(base / "P"),
+               "PROGRAMDATA": str(base / "PD"), "USERPROFILE": str(base / "U")}
+        with mock.patch.dict(os.environ, env):
+            w = Watcher(config, store)
+            w.initial_scan()
+        game = w.snapshot()[0]
+        self.assertEqual(len(game.unlocked), 1)
+        schema = store.get(game.appid)
+        self.assertEqual((schema.title, schema.info("ACH_WIN").title), ("Fall Guys", "Winner"))

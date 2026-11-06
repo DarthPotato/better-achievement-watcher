@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from .config import Config
-from . import gog, native
+from . import epic, gog, native
 from .parsers import AchievementState, parse_file
 from .scanner import SaveFile, scan_game_folders, scan_save_roots
 from .steam_local import STEAM_SOURCE, installed_appids, parse_steam_stats
@@ -194,6 +194,10 @@ class Watcher:
                 if not known:
                     self._files[save.path] = TrackedFile(save, quiet=not notify)
             if not known:
+                if save.emulator == epic.SOURCE:  # names and icons come with the save
+                    schema = epic.build_schema(save.path)
+                    if schema is not None:
+                        self.store.register_fixed_schema(schema)
                 self._refresh(self._files[save.path], notify)
         # Forget files that were deleted.
         with self._lock:
@@ -210,7 +214,8 @@ class Watcher:
         if tracked.save.emulator == STEAM_SOURCE:
             states = parse_steam_stats(tracked.save.path)
         else:
-            states = (native.parser_for(tracked.save.emulator) or parse_file)(tracked.save.path)
+            parser = epic.parse if tracked.save.emulator == epic.SOURCE else native.parser_for(tracked.save.emulator)
+            states = (parser or parse_file)(tracked.save.path)
         if states is None:
             # Probably caught the emulator mid-write: retry on the next poll. A file that
             # stays unreadable (unsupported binary format) is only re-read once it changes.
