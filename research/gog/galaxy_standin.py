@@ -10,7 +10,12 @@ import threading
 import time
 import urllib.request
 
-seconds, log_path, peer_dir, steam_appid = float(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4])
+seconds, log_path, peer_dir, source = float(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+# source: a Steam AppID (achievement keys from Steam), or "ach=KEY,KEY;stats=KEY,KEY" (keys from the game's log)
+steam_appid = int(source) if source.isdigit() else 0
+SPEC = dict(part.split("=", 1) for part in source.split(";") if "=" in part)
+STATS = [(i + 1, key) for i, key in enumerate(k for k in SPEC.get("stats", "").split(",") if k)]
+STAT_VALUES = {}
 log = open(log_path, "w", encoding="utf-8")
 USER_ID = (2 << 56) | 1234567  # a made-up local user
 
@@ -90,6 +95,9 @@ def f_float(num, value):
 # ------------------------------------------------------------ achievements
 
 def load_achievements():
+    if not steam_appid:
+        keys = [k for k in SPEC.get("ach", "").split(",") if k]
+        return [(i + 1, key, key, "") for i, key in enumerate(keys)]
     url = f"https://api.steampowered.com/IPlayerService/GetGameAchievements/v1/?appid={steam_appid}&language=english"
     data = json.loads(urllib.request.urlopen(url, timeout=15).read())
     items = data["response"]["achievements"]
@@ -115,7 +123,18 @@ def handle(type_, payload):
         write(f"  auth from client_id={fields.get(1)} pid={fields.get(5)}")
         return 4, f_varint(2, 0) + f_fixed64(3, USER_ID) + f_bytes(4, "Player") + f_varint(5, 0)
     if type_ == 15:  # GET_USER_STATS_REQUEST
-        return 16, b""
+        body = b""
+        for stat_id, key in STATS:
+            entry = (f_fixed64(1, stat_id) + f_bytes(2, key) + f_varint(3, 1)  # VALUE_TYPE_INT
+                     + f_varint(5, STAT_VALUES.get(stat_id, 0)) + f_varint(8, 0) + f_varint(10, 0)
+                     + f_varint(12, 2147483647) + f_varint(15, 0))
+            body += f_bytes(1, entry)
+        return 16, body
+    if type_ == 17:  # UPDATE_USER_STAT_REQUEST
+        stat_id, value = fields.get(1, [0])[0], fields.get(4, [0])[0]
+        STAT_VALUES[stat_id] = value
+        write(f"  stat {dict(STATS).get(stat_id, stat_id)} = {value}")
+        return 18, b""
     if type_ == 23:  # GET_USER_ACHIEVEMENTS_REQUEST
         body = b""
         for ach_id, key, name, desc in ACHIEVEMENTS:
