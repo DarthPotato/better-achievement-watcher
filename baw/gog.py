@@ -38,6 +38,11 @@ _lock = threading.RLock()
 
 SteamLookup = Callable[[int], Optional[GameSchema]]
 
+# Games known to get stuck with an offline Galaxy sign-in, and why (untracked by default).
+UNTRACKED_REASONS = {
+    1162687982: "it waits for online leaderboards, which need a real GOG login",  # IRON NEST
+}
+
 
 @dataclass
 class GogGame:

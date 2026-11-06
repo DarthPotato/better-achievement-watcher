@@ -475,7 +475,10 @@ class App:
         self.game_meta.configure(text=f"AppID {appid}  •  {len(unlocked)} of {total} unlocked  •  "
                                       f"{', '.join(emulators)}  •  names from {schema.source or 'save file'}")
         if appid in self.config.gog_untracked and any(s.emulator == gog.SOURCE for s in game.sources):
-            self.game_meta.configure(text=self.game_meta.cget("text") + "  \u2022  not tracked (right-click to change)")
+            reason = gog.UNTRACKED_REASONS.get(appid)
+            note = (f"Not tracked: {reason}, so it would get stuck loading. It starts normally without achievements."
+                    if reason else "Not tracked: it starts without achievements.")
+            self.game_meta.configure(text=self.game_meta.cget("text") + f"\n{note} Right-click the game to change this.")
         if borrowed_from:
             recorded = (f"{len(unlocked)} of {total} achievements recorded in the save are shown by their raw names."
                         if total else "Its save hasn't recorded any achievements.")
@@ -517,7 +520,9 @@ class App:
             self.start_gog()
             if after_setup:
                 messagebox.showinfo(APP_NAME, "GOG games are set up. Start a GOG game while this app is "
-                                    "running and its achievements will pop up here.", parent=self.root)
+                                    "running and its achievements will pop up here.\n\nIf a GOG game gets "
+                                    "stuck while loading, right-click it in the list and choose \u201cDon't "
+                                    "track this game\u201d.", parent=self.root)
         elif after_setup and not status.service:
             messagebox.showwarning(APP_NAME, "GOG games need a small Windows service, and it wasn't installed "
                                    "(the admin prompt was declined?). Turn the option off and on in Settings "
@@ -573,7 +578,13 @@ GOG_SETUP_TEXT = (
     "step). It does nothing by itself: GOG games only look for it before they connect. It's the "
     "dummy service from the open-source Comet project, checked against a known checksum.\n\n"
     "No GOG account is used and nothing is sent to GOG. Turning the option off later offers to "
-    "remove the service again."
+    "remove the service again.\n\n"
+    "Good to know:\n"
+    "  \u2022  Keep this app running while you play (Start with Windows does that). Otherwise GOG "
+    "games wait 15-30 seconds on their splash screen before they start.\n"
+    "  \u2022  A few games wait for online features such as leaderboards, which need a real GOG "
+    "login, and get stuck while loading. Right-click such a game in the list and choose "
+    "\u201cDon't track this game\u201d: it then starts normally, without achievements."
 )
 
 
