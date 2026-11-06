@@ -726,3 +726,32 @@ class GogTests(unittest.TestCase):
             responses[gog_setup.PEER_MANIFEST] = json.dumps(manifest).encode()
             with self.assertRaises(ValueError):
                 gog_setup.install_peer()
+
+
+@unittest.skipUnless(importlib.util.find_spec("tkinter"), "needs Tk")
+class UpdateRecheckTests(unittest.TestCase):
+    def test_rechecks_while_running(self):
+        import tkinter as tk
+
+        try:
+            tk.Tk().destroy()
+        except tk.TclError:
+            self.skipTest("no display")
+        from baw import app as app_module
+
+        config = Config(scan_default_locations=False, include_steam_library=False, scan_common_game_folders=False)
+        app = app_module.App(config, offline=True)
+        try:
+            scheduled = []
+            with mock.patch.object(app_module.install, "running_exe", return_value=Path("C:/x/BAW.exe")), \
+                    mock.patch.object(app.root, "after", side_effect=lambda ms, fn: scheduled.append(ms)):
+                app._schedule_update_check()
+            self.assertEqual(app.work_queue.get_nowait(), ("update_check",))
+            self.assertEqual(scheduled, [app_module.UPDATE_RECHECK_MS])
+            scheduled.clear()
+            with mock.patch.object(app_module.install, "running_exe", return_value=None), \
+                    mock.patch.object(app.root, "after", side_effect=lambda ms, fn: scheduled.append(ms)):
+                app._schedule_update_check()  # from source: no checks at all
+            self.assertEqual(scheduled, [])
+        finally:
+            app.root.destroy()
