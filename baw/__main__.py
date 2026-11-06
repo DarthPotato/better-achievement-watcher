@@ -141,6 +141,19 @@ def offer_install(config: Config) -> bool:
     return answer
 
 
+def use_windows_certificates() -> None:
+    """Verify HTTPS through Windows (truststore) when available.
+
+    Python's bundled OpenSSL only trusts certificates it can chain on its own; Windows also
+    fetches intermediate certificates a server leaves out, which some CDNs (GOG's) need."""
+    try:
+        import truststore
+
+        truststore.inject_into_ssl()
+    except Exception:
+        pass
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="baw", description=APP_NAME)
     parser.add_argument("command", nargs="?", default="gui", choices=["gui", "scan", "doctor", "test-popup"])
@@ -157,6 +170,7 @@ def main(argv=None) -> int:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError):
             pass
+    use_windows_certificates()
     config = Config.load()
 
     if args.command == "scan":
