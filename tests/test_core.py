@@ -889,3 +889,12 @@ class ReviewFixTests(unittest.TestCase):
         exe = write(folder / "BetterAchievementWatcher.exe", "x")
         install.delete_later(exe)
         self.assertFalse(folder.exists())
+
+
+class StatsIniTests(unittest.TestCase):
+    def test_codex_stats_are_not_achievements(self):
+        # Dying Light (CODEX): progress counters must never pop up as "ACH_11_PROGRESS" unlocks.
+        text = b"[UserStats]\nACH_10_PROGRESS=3\nACH_11_PROGRESS=1\nACH_21_PROGRESS=20195\n"
+        self.assertEqual(parse_bytes(text), {})
+        self.assertEqual(parse_bytes(b"[Whatever]\nKILLS=1\nDISTANCE=120\n"), {})  # counters by their values
+        self.assertEqual(unlocked(parse_bytes(b"[Achievements]\nACH_A=1\nACH_B=0\n")), {"ACH_A"})  # still a flat list
