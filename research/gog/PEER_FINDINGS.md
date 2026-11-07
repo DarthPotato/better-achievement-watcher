@@ -110,3 +110,31 @@ With the logon guard lifted the game reaches code it never ran before, and crash
   immediate return (rip = return address, rsp += 8) and logged. Verified: StoreStats at 17:02:23, call skipped, game kept running.
 - Not caused by the guard patch as such, but the guard patch is what lets the game get this far. Without it the game never
   leaves its disclaimer screen.
+
+## Result (2026-11-07, IRON NEST, SDK 1.152.10, Galaxy64.dll sha256 265bcb6f...33ac)
+
+Pass criterion met with `galaxy_standin.py` + `run_hook.py logged_on_hook.js`:
+- IRON NEST gets past its disclaimer while the stand-in answers its sign-in (offline, no token).
+- The stand-in logs `GET_LEADERBOARDS_BY_KEY_REQUEST` (type 40, key `TestHighScore`) and answers it with an empty board.
+- Finishing the first mission makes the game call `SetAchievement("ACHIEVEMENT_1_CLEAR")` (and `ACHIEVEMENT_1_GOLDEN`); the game
+  stores on exit (`StoreStats` at quit), and the stand-in logs `UNLOCK id=1 ACHIEVEMENT_1_CLEAR`. (`ACHIEVEMENT_1_CLEAR` is the
+  first mission clear, not the calibration shot.) The second key was not in the stand-in's list, so the SDK refuses it.
+- Ran 50+ minutes without a crash, past the `StoreStats` call at 5:00 (see the section above).
+
+What the fix consists of, all in memory, nothing on disk and nothing sent to GOG:
+1. Replace the SDK's shared "%s: not logged on" guard helper with a no-op (found by its text, not by address).
+2. Turn the SDK's call of an empty result callback (address 0) into a skipped call.
+3. The stand-in answers the leaderboard messages (31, 33-35, 37, 40, 41).
+
+## What else could be gated (honest list)
+
+- Verified: leaderboards (`FindLeaderboard`; the other leaderboard calls use the same guard helper per the strings, not run).
+- Same helper, not tested: anything calling `FUN_18016ae80`. Its direct callers could not be listed (indirect calls); the peer
+  analysis showed the guard text on `RequestLeaderboards`, `RequestLeaderboardEntries*`, `FindOrCreateLeaderboard`.
+- Not looked at: lobbies/matchmaking, cloud storage, user data, friends/presence, networking. They may have their own guards,
+  and they need real servers or other peers, so empty answers may not be enough.
+- `ACHIEVEMENT_*` keys the stand-in does not list are refused by the SDK ("not found"); the app takes keys from the game's files.
+- Only one SDK build (1.152.10) and one game tested. The hook finds the guard by text, so other builds with the same strings
+  should work, but older peers with inline per-API guards are left alone. Games whose SDK loads the external
+  `GalaxyPeer*.dll` (older SDKs) were not tested at all.
+- The hook is not part of the app. It needs Frida, runs inside the game process and has to start with the game.

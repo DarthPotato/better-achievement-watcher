@@ -29,6 +29,10 @@ const st = setInterval(() => {
   clearInterval(st);
   for (const e of mod.enumerateExports().filter(e => /^SteamAPI_ISteamUserStats_/.test(e.name))) {
     if (/FindLeaderboard/.test(e.name)) continue; // already traced above
-    Interceptor.attach(e.address, { onEnter() { log('steam call ' + e.name.replace('SteamAPI_ISteamUserStats_', '') + ' at ' + new Date().toISOString().substr(11, 12)); } });
+    Interceptor.attach(e.address, { onEnter(args) {
+      let arg = '';
+      if (/Achievement$|AchievementProgress|SetStat|GetAchievement$/.test(e.name)) { try { arg = ' (' + args[1].readCString(80) + ')'; } catch (x) {} }
+      log('steam call ' + e.name.replace('SteamAPI_ISteamUserStats_', '') + arg + ' at ' + new Date().toISOString().substr(11, 12));
+    } });
   }
 }, 50);
