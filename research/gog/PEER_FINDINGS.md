@@ -55,6 +55,15 @@ loads is not confirmed yet; the other builds should share this logic but have di
    So the handle 0 is the peer's "not logged on" exception coming back as an error. Nothing in the wrapper is a separate gate,
    and nothing there can be answered from the stand-in.
 
+10. **IRON NEST does not load the external peer at all.** Test run (stand-in on a copy of the peers whose "logged on" predicate
+    `FUN_18004a170` was patched to return true, in `msvc-17` and `msvc-18`): the game sent no `LIBRARY_INFO_REQUEST`, and
+    `GalaxyPeer64.dll` was not among its loaded modules. Its own `Galaxy64.dll` (SDK 1.152.10, 14 MB) carries the same peer code
+    (strings "not logged on", "OnGetAuthInfoSuccess", "Performing a get leaderboards request", "auth.gog.com" are in it).
+    It talked to the stand-in directly: AUTH_INFO_REQUEST, GET_USER_STATS (15), GET_USER_ACHIEVEMENTS (23), nothing more.
+    So serving a patched peer copy does not help for games with a recent SDK; the patch would have to go into the game's own
+    `Galaxy64.dll` (in memory). The external peer is only used by older SDKs (e.g. 1.139).
+    The "logged on" predicate in the msvc-17 peer is `8b 81 d8 00 00 00 d1 e8 83 e0 01 c3` (`mov eax,[rcx+0xd8]; shr eax,1; and eax,1; ret`).
+
 ## Conclusion so far
 
 "Logged on" is not something the stand-in's answers can set by themselves. It is the `online` argument of the peer's own
@@ -74,3 +83,16 @@ try to use against `auth.gog.com`. That conflicts with the "nothing leaves the m
   storage, user data, friends/presence, matchmaking.
 - Confirm on the machine with the stand-in log (Frida only from a normal terminal, see REA_BRIEF.md), and which `msvc-*` build
   IRON NEST loads.
+
+## Result: in-memory patch of the SDK's logon guard (tested on IRON NEST, SDK 1.152.10)
+
+- In `Galaxy64.dll` the guards are two small shared helpers called at the start of each online API: a signed-in one and
+  `FUN_18016ae80(object, "<api>")` (throws `"%s: not logged on"`). `FindLeaderboard` (`FUN_180141700`) calls both.
+- `logged_on_hook.js` (Frida) finds that helper without a fixed address: it looks for the text `%s: not logged on`, finds the code
+  that loads it (native `lea rip` scan in a CModule, a JS loop is too slow and the game calls FindLeaderboard before the patch lands),
+  takes the function from the exception table, and if it is small (< 0x200 bytes) replaces it with a no-op.
+- Result: `FindLeaderboard("TestHighScore")` no longer errors, the stand-in receives `GET_LEADERBOARDS_BY_KEY_REQUEST` (40), and
+  the game gets past its disclaimer to the main menu. Without the patch: `FindLeaderboard: not logged on`, handle 0.
+- The stand-in (`galaxy_standin.py`) answers 31/40 with leaderboard definitions, 33-35 with empty entries, 37 with an accepted score,
+  41 with an id. Unanswered, the SDK retries the request every second.
+- Older peer builds have per-API inline guards (no small helper); the hook leaves those alone and logs it.
