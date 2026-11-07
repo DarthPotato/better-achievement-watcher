@@ -64,19 +64,18 @@ function containing(mod, table, rva) {
   return null;
 }
 
-function install(mod) {
+// Functions (rva -> {size, refs}) whose code loads the given text. Native scan: a JS loop over 10 MB takes seconds,
+// and the game would call FindLeaderboard before we patch.
+function functionsReferencing(mod, text) {
   const { sections: secs, nt } = sections(mod);
   const table = functionTable(mod, nt);
-  const needle = Array.from(NEEDLE).map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ');
+  const needle = Array.from(text).map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' ');
   const strings = [];
   for (const s of secs) {
     if (s.flags & 0x20000000) continue; // code
     for (const hit of Memory.scanSync(mod.base.add(s.rva), s.size, needle)) strings.push(hit.address);
   }
-  if (!strings.length) { log(mod.name + ': no "' + NEEDLE + '" text'); return false; }
-
-  // Native scan (a JS loop over 10 MB takes seconds, and the game would call FindLeaderboard before we patch).
-  const found = new Map(); // function rva -> {size, refs}
+  const found = new Map();
   const out = Memory.alloc(8 * 64);
   for (const s of secs) {
     if (!(s.flags & 0x20000000)) continue;
@@ -90,6 +89,31 @@ function install(mod) {
       }
     }
   }
+  return found;
+}
+
+// SDK bug seen with IRON NEST (StoreStats with nothing to store): the SDK delivers the result to the game's callback
+// through a table whose call slot is empty, i.e. it calls address 0. Catch exactly that (a jump to 0 made from inside the SDK)
+// and make the call return at once, as if the callback had done nothing. The callback only reports "stats stored".
+let rescued = 0;
+function installDispatchFix(mod) {
+  Process.setExceptionHandler(d => {
+    if (d.type !== 'access-violation' || !d.memory || d.memory.operation !== 'execute' || !d.address.isNull()) return false;
+    const c = d.context;
+    let ret;
+    try { ret = c.rsp.readPointer(); } catch (e) { return false; }
+    if (ret.compare(mod.base) < 0 || ret.compare(mod.base.add(mod.size)) >= 0) return false; // not called from the SDK
+    c.rip = ret; // pretend the callee returned
+    c.rsp = c.rsp.add(8);
+    if (rescued++ < 20) log('SDK called an empty callback (address 0) from ' + mod.name + '+0x' + ret.sub(mod.base).toString(16) + ': call skipped');
+    return true;
+  });
+  log(mod.name + ': empty-callback rescue installed');
+}
+
+function install(mod) {
+  const found = functionsReferencing(mod, NEEDLE);
+  if (!found.size) { log(mod.name + ': no "' + NEEDLE + '" text or no code using it'); return false; }
   let patched = 0;
   for (const [begin, info] of found) {
     const where = mod.name + '+0x' + begin.toString(16);
@@ -139,6 +163,7 @@ const timer = setInterval(() => {
     log('found ' + name + ' at ' + mod.base);
     try { traceThrows(mod); } catch (e) { log(name + ': throw trace failed: ' + e); }
     try { install(mod); } catch (e) { log(name + ': hook failed: ' + e); }
+    try { installDispatchFix(mod); } catch (e) { log(name + ': dispatch fix failed: ' + e); }
   }
 }, 50);
 log('waiting for ' + MODULES.join(' / '));

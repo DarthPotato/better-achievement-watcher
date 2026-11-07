@@ -96,3 +96,17 @@ try to use against `auth.gog.com`. That conflicts with the "nothing leaves the m
 - The stand-in (`galaxy_standin.py`) answers 31/40 with leaderboard definitions, 33-35 with empty entries, 37 with an accepted score,
   41 with an id. Unanswered, the SDK retries the request every second.
 - Older peer builds have per-API inline guards (no small helper); the hook leaves those alone and logs it.
+
+## The ~5 minute crash (SDK bug, found while testing the hook)
+
+With the logon guard lifted the game reaches code it never ran before, and crashed about five minutes after launch every time
+(access violation, execute at address 0, inside `Galaxy64.dll` at `ProcessData` -> listener dispatcher).
+- The crash comes right after the game calls Steam's `StoreStats` (traced with `probe_wrapper.js`: `steam call StoreStats` 2 ms before
+  the dispatch). Listener type 12 is the stats-and-achievements-store listener.
+- The dispatcher (`Operation for specific listener not found...`, one copy per listener type, 45 in this build) delivers the result
+  with `and rax,-2 ; call qword ptr [rax+8]`. For this event the callback table's call slot is empty, so it calls address 0.
+  The table is re-read on each pass of the dispatcher's loop, so a check at function entry is too early.
+- `logged_on_hook.js` now installs a process exception handler: a jump to address 0 made from inside the SDK is turned into an
+  immediate return (rip = return address, rsp += 8) and logged. Verified: StoreStats at 17:02:23, call skipped, game kept running.
+- Not caused by the guard patch as such, but the guard patch is what lets the game get this far. Without it the game never
+  leaves its disclaimer screen.

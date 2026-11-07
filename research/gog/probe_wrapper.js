@@ -21,3 +21,14 @@ const wt = setInterval(() => {
     onLeave(ret) { log('wrapper FindLeaderboard impl -> ' + ret); },
   });
 }, 50);
+
+// Log every Steam stats call the game makes (names + time), to see what is in flight when the SDK later fires a listener.
+const st = setInterval(() => {
+  const mod = Process.findModuleByName('steam_api64.dll');
+  if (!mod) return;
+  clearInterval(st);
+  for (const e of mod.enumerateExports().filter(e => /^SteamAPI_ISteamUserStats_/.test(e.name))) {
+    if (/FindLeaderboard/.test(e.name)) continue; // already traced above
+    Interceptor.attach(e.address, { onEnter() { log('steam call ' + e.name.replace('SteamAPI_ISteamUserStats_', '') + ' at ' + new Date().toISOString().substr(11, 12)); } });
+  }
+}, 50);
