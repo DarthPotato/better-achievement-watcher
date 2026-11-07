@@ -37,6 +37,8 @@ MAX_PROGRESS_KEYS = ("maxprogress", "max_progress", "max")
 META_SECTIONS = {"steamachievements", "steam", "steam64", "settings", "stats", "user", "info"}
 TIME_SECTIONS = {"achievementsunlocktimes", "time", "unlocktimes", "times"}
 STATE_SECTIONS = {"state"}
+# Stat counters (CODEX stats.ini: [UserStats] ACH_11_PROGRESS=2), never achievements.
+STAT_SECTIONS = {"stats", "stat", "userstats", "userstat", "steamstats", "statistics"}
 
 TRUE_STRINGS = {"1", "true", "yes", "on"}
 FALSE_STRINGS = {"0", "false", "no", "off", ""}
@@ -253,18 +255,20 @@ def parse_ini(text: str) -> Dict[str, AchievementState]:
         if lname in STATE_SECTIONS:
             hex_states.update(entries)
             continue
+        if lname in STAT_SECTIONS:
+            continue
         if section and _has_achieved_key(entries):
             result[section] = _from_entry(section, entries)
             continue
         if lname in META_SECTIONS and lname != "steamachievements":
             continue
         # Flat section: ACH_NAME=1. Skip index tables like CODEX's "00000=ACH_NAME" and "Count=12".
-        for key, value in entries.items():
-            if key.isdigit() or key.lower() in ("count", "version"):
-                continue
-            v = value.strip().lower()
-            if v in TRUE_STRINGS or v in FALSE_STRINGS:
-                result[key] = AchievementState(key, v in TRUE_STRINGS)
+        flags = {k: v.strip().lower() for k, v in entries.items()
+                 if not k.isdigit() and k.lower() not in ("count", "version")}
+        if any(v not in TRUE_STRINGS and v not in FALSE_STRINGS for v in flags.values()):
+            continue  # other values (3, 1352, ...) mean counters, so a 1 among them isn't an unlock
+        for key, v in flags.items():
+            result[key] = AchievementState(key, v in TRUE_STRINGS)
 
     for name, value in hex_states.items():
         v = value.strip()
