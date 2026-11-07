@@ -31,6 +31,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 GUARD_TEXT = b"%s: not logged on\x00"
 MAX_HELPER_SIZE = 0x200  # the shared guard is tiny; guards inlined in big functions are left alone
+HELPER_EXES = ("crash", "unins", "setup", "redist")  # not the game itself: leave them alone
 SDK_MODULES = ("galaxy64.dll",)  # 1.152+ carries the peer code itself; 32-bit builds are not handled
 RET = b"\xc3"
 
@@ -421,7 +422,8 @@ class HookManager:
                 for folder in folders:
                     try:
                         for exe in folder.glob("*.exe"):
-                            names.setdefault(exe.name.lower(), []).append(folder)
+                            if not any(word in exe.name.lower() for word in HELPER_EXES):
+                                names.setdefault(exe.name.lower(), []).append(folder)
                     except OSError:
                         continue
                 alive = set()
