@@ -11,6 +11,7 @@ const NEEDLE = '%s: not logged on';
 const MAX_HELPER_SIZE = 0x200; // a shared guard is tiny; the per-API inline guards live in big functions
 
 function log(msg) { send({ type: 'log', msg }); }
+const keepAlive = [];
 
 // Finds `lea reg, [rip+disp]` instructions (REX.W 8D /r, mod=00 rm=101) whose target is `target`; returns how many.
 const scanner = new CModule(`
@@ -93,11 +94,13 @@ function install(mod) {
   for (const [begin, info] of found) {
     const where = mod.name + '+0x' + begin.toString(16);
     if (info.size > MAX_HELPER_SIZE) { log(where + ': guard is inline in a big function (' + info.size + ' bytes), left alone'); continue; }
-    Interceptor.replace(mod.base.add(begin), new NativeCallback(function (obj, api) {
+    const noop = new NativeCallback(function (obj, api) {
       let name = '?';
       try { name = api.readCString(); } catch (e) {}
       log('guard skipped for ' + name);
-    }, 'void', ['pointer', 'pointer']));
+    }, 'void', ['pointer', 'pointer']);
+    keepAlive.push(noop); // a collected NativeCallback would leave the game calling freed code
+    Interceptor.replace(mod.base.add(begin), noop);
     log(where + ': "not logged on" guard helper (' + info.size + ' bytes) replaced with a no-op');
     patched++;
   }
