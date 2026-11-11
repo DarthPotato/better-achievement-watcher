@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Set
 
 from . import galaxy_proto as pb
 from . import gog
@@ -31,14 +31,23 @@ GET_USER_ACHIEVEMENTS_REQUEST, GET_USER_ACHIEVEMENTS_RESPONSE = 23, 24
 UNLOCK_USER_ACHIEVEMENT_REQUEST, UNLOCK_USER_ACHIEVEMENT_RESPONSE = 25, 26
 CLEAR_USER_ACHIEVEMENT_REQUEST, CLEAR_USER_ACHIEVEMENT_RESPONSE = 27, 28
 DELETE_USER_ACHIEVEMENTS_REQUEST, DELETE_USER_ACHIEVEMENTS_RESPONSE = 29, 30
+GET_LEADERBOARDS_REQUEST, GET_LEADERBOARDS_RESPONSE = 31, 32
+GET_LEADERBOARD_ENTRIES_GLOBAL_REQUEST, GET_LEADERBOARD_ENTRIES_AROUND_USER_REQUEST = 33, 34
+GET_LEADERBOARD_ENTRIES_FOR_USERS_REQUEST, GET_LEADERBOARD_ENTRIES_RESPONSE = 35, 36
+SET_LEADERBOARD_SCORE_REQUEST, SET_LEADERBOARD_SCORE_RESPONSE = 37, 38
+GET_LEADERBOARDS_BY_KEY_REQUEST = 40
+CREATE_LEADERBOARD_REQUEST, CREATE_LEADERBOARD_RESPONSE = 41, 42
 GET_USER_TIME_PLAYED_REQUEST, GET_USER_TIME_PLAYED_RESPONSE = 43, 44
 OVERLAY_STATE_CHANGE_NOTIFICATION = 58
 NOT_IMPLEMENTED = 501
 UNAUTHORIZED = 401  # what GOG answers for a game the account doesn't own; the game then runs offline
 VALUE_TYPE_INT, VALUE_TYPE_FLOAT = 1, 2
+SORT_DESCENDING, DISPLAY_NUMERIC = 2, 1  # leaderboard definition enums
+LEADERBOARD_ID_BASE = 0x2000000000000000
 
 GameResolver = Callable[[str, int], Optional[gog.GogGame]]
 TrackedCheck = Callable[[gog.GogGame], bool]
+HookReady = Callable[[int], bool]
 
 
 def exe_of_pid(pid: int) -> Optional[Path]:
@@ -67,6 +76,7 @@ class Session:
         self.game: Optional[gog.GogGame] = None
         self.ids: Dict[int, str] = {}  # achievement id we handed out -> key
         self.stat_ids: Dict[int, str] = {}
+        self.boards: Dict[str, int] = {}  # leaderboard key -> id we handed out
 
     def run(self) -> None:
         buffer = b""
@@ -119,6 +129,14 @@ class Session:
                 self.service.log(f"{self.game.name} isn't tracked: refused its sign-in so it runs without Galaxy")
                 self.game = None
                 return UNAUTHORIZED
+            pid = int(pb.first(fields, 5, 0) or 0)
+            if (self.game and self.game.game_id in self.service.needs_hook
+                    and not self.service.hook_ready(pid)):
+                # Without the fix its SDK refuses the leaderboard request and the game waits for it forever.
+                self.service.log(f"{self.game.name}: the fix isn't attached to it, so its sign-in is refused "
+                                 "and it runs without Galaxy")
+                self.game = None
+                return UNAUTHORIZED
             if self.game:
                 self.service.log(f"{self.game.name} signed in ({client_id}): {len(self.game.aliases)} achievement "
                                  f"keys, {len(self.game.stats)} stat keys")
@@ -164,7 +182,27 @@ class Session:
             return type_ + 1, b""
         if type_ == GET_USER_TIME_PLAYED_REQUEST:
             return GET_USER_TIME_PLAYED_RESPONSE, pb.uint(1, 0)
+        if type_ == CREATE_LEADERBOARD_REQUEST:
+            return CREATE_LEADERBOARD_RESPONSE, pb.fixed64(1, self._board(pb.text(fields, 1)))
+        if type_ in (GET_LEADERBOARDS_REQUEST, GET_LEADERBOARDS_BY_KEY_REQUEST):
+            # Empty boards: the game gets valid definitions and nobody on them. Games that wait for a leaderboard
+            # at startup (IRON NEST) carry on; this only helps once the SDK lets the request through (galaxy_hook).
+            for key in fields.get(1, []) if type_ == GET_LEADERBOARDS_BY_KEY_REQUEST else []:
+                self._board(key.decode("utf-8", "replace") if isinstance(key, bytes) else str(key))
+            body = b"".join(pb.string(1, pb.fixed64(1, board_id) + pb.string(2, key) + pb.string(3, key)
+                                      + pb.uint(4, SORT_DESCENDING) + pb.uint(5, DISPLAY_NUMERIC))
+                            for key, board_id in self.boards.items())
+            return GET_LEADERBOARDS_RESPONSE, body
+        if type_ in (GET_LEADERBOARD_ENTRIES_GLOBAL_REQUEST, GET_LEADERBOARD_ENTRIES_AROUND_USER_REQUEST,
+                     GET_LEADERBOARD_ENTRIES_FOR_USERS_REQUEST):
+            return GET_LEADERBOARD_ENTRIES_RESPONSE, pb.uint(2, 0)
+        if type_ == SET_LEADERBOARD_SCORE_REQUEST:
+            score = pb.first(fields, 2, 0)
+            return SET_LEADERBOARD_SCORE_RESPONSE, pb.uint(1, score) + pb.uint(2, 0) + pb.uint(3, 1) + pb.uint(4, 1)
         return None
+
+    def _board(self, key: str) -> int:
+        return self.boards.setdefault(key, LEADERBOARD_ID_BASE + len(self.boards) + 1)
 
     def _stats(self) -> bytes:
         if self.game is None:
@@ -202,8 +240,11 @@ class Session:
 
 class GalaxyService:
     def __init__(self, peer_dir: Path, resolver: GameResolver, log: Callable[[str], None] = print, port: int = PORT,
-                 tracked: Optional[TrackedCheck] = None):
+                 tracked: Optional[TrackedCheck] = None, needs_hook: Optional[Set[int]] = None,
+                 hook_ready: Optional[HookReady] = None):
         self.tracked = tracked or (lambda game: True)
+        self.needs_hook = needs_hook or set()  # game ids that only work while galaxy_hook is attached
+        self.hook_ready = hook_ready or (lambda pid: False)
         self.port = port
         self.peer_dir = peer_dir
         self.resolver = resolver

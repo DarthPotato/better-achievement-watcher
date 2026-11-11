@@ -43,6 +43,8 @@ SteamLookup = Callable[[int], Optional[GameSchema]]
 UNTRACKED_REASONS = {
     1162687982: "it waits for online leaderboards, which need a real GOG login",  # IRON NEST
 }
+# ...of those, the ones galaxy_hook can get going: tracking them attaches the fix to the running game.
+NEEDS_HOOK = {1162687982}
 
 
 @dataclass

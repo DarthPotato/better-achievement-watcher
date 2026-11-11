@@ -11,7 +11,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Dict, List, Optional
 
-from . import APP_NAME, __version__, gog, gog_setup, install, startup, update
+from . import APP_NAME, __version__, galaxy_hook, gog, gog_setup, install, startup, update
 from .winicon import shield_image
 from .galaxy_service import GalaxyService
 from .config import Config
@@ -75,6 +75,7 @@ class App:
         self._schema_requested: set = set()
         self._listener: Optional[socket.socket] = None
         self.galaxy: Optional[GalaxyService] = None
+        self.gog_hooks: Optional[galaxy_hook.HookManager] = None
         self.gog_port_taken = False
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -403,7 +404,8 @@ class App:
             game = self.games.get(appid)
             if game and any(s.emulator == gog.SOURCE for s in game.sources):
                 if appid in self.config.gog_untracked:
-                    menu.add_command(label="Track this game", command=lambda: self.set_gog_tracked(appid, True))
+                    label = "Track this game (attaches a fix to it)" if appid in gog.NEEDS_HOOK else "Track this game"
+                    menu.add_command(label=label, command=lambda: self.set_gog_tracked(appid, True))
                 else:
                     menu.add_command(label="Don't track this game", command=lambda: self.set_gog_tracked(appid, False))
                 menu.add_command(label="Reset achievements...", command=lambda: self.reset_gog_game(appid))
@@ -481,6 +483,9 @@ class App:
             reason = gog.UNTRACKED_REASONS.get(appid)
             note = (f"Not tracked: {reason}, so it would get stuck loading. It starts normally without achievements."
                     if reason else "Not tracked: it starts without achievements.")
+            if appid in gog.NEEDS_HOOK:
+                note += (" Tracking it makes this app attach a fix to the running game (a debugger-style patch of its "
+                         "memory; nothing in its files changes). Windows only.")
             self.game_meta.configure(text=self.game_meta.cget("text") + f"\n{note} Right-click the game to change this.")
         if borrowed_from:
             recorded = (f"{len(unlocked)} of {total} achievements recorded in the save are shown by their raw names."
@@ -506,9 +511,12 @@ class App:
 
     def start_gog(self) -> None:
         if self.galaxy is None:
+            self.gog_hooks = galaxy_hook.HookManager(self._hooked_folders, log=gog.log)
             service = GalaxyService(gog_setup.peer_dir(), self.watcher.gog_game, log=gog.log,
-                                    tracked=lambda game: game.game_id not in self.config.gog_untracked)
+                                    tracked=lambda game: game.game_id not in self.config.gog_untracked,
+                                    needs_hook=gog.NEEDS_HOOK, hook_ready=self.gog_hooks.ready)
             if service.start():
+                self.gog_hooks.start()
                 self.galaxy = service
                 self.gog_port_taken = False
             else:
@@ -529,7 +537,15 @@ class App:
             return f"\u25cf Not set up ({missing} missing): turn the option off and on", "#b35900"
         return "\u25cf Set up, starting...", "#b35900"
 
+    def _hooked_folders(self) -> List[Path]:
+        """Install folders of tracked games that only work with galaxy_hook attached."""
+        return [Path(game.folder) for game in list(self.watcher.gog_games.values())
+                if game.game_id in gog.NEEDS_HOOK and game.game_id not in self.config.gog_untracked]
+
     def stop_gog(self) -> None:
+        if self.gog_hooks is not None:
+            self.gog_hooks.stop()
+            self.gog_hooks = None
         if self.galaxy is not None:
             self.galaxy.stop()
             self.galaxy = None
