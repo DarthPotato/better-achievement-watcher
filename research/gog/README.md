@@ -57,8 +57,9 @@ Bethesda games treat as cheating). IRON NEST gets "stats received" (Steam callba
 `FindLeaderboard` at startup; GOG's peer rejects leaderboards without an online session (the wrapper
 returns handle 0) and the game waits forever on its disclaimer screen. Answering its sign-in with 401
 (what GOG does for unowned games) makes it start normally without achievements; the app does that for
-games in `Config.gog_untracked` (IRON NEST by default). Making leaderboards work would need the peer to
-believe it's online, i.e. reverse engineering.
+games in `Config.gog_untracked` (IRON NEST by default). Making leaderboards work needed the SDK's "not logged on" guard
+lifted in the game's memory: see `PEER_FINDINGS.md` and `baw/galaxy_hook.py` (the app does this for
+IRON NEST when it is tracked).
 
 With the service installed but the app not running, GOG games wait 15-30 s on their splash screen:
 Comet's dummy service never reports RUNNING (it stays START_PENDING), so the SDK waits for Galaxy.
