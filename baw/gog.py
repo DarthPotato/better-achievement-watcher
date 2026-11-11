@@ -47,6 +47,19 @@ UNTRACKED_REASONS = {
 NEEDS_HOOK = {1162687982}
 
 
+def untracked_note(appid: int) -> str:
+    """Why an untracked GOG game shows no achievements, for the viewer (most games work fine when tracked)."""
+    if appid in NEEDS_HOOK:
+        return (f"Not tracked: {UNTRACKED_REASONS.get(appid, 'it can get stuck loading')}. Right-click it and choose "
+                "“Track this game” to attach a fix to the running game; left off, it starts normally "
+                "without achievements.")
+    if appid in UNTRACKED_REASONS:
+        return (f"Not tracked: {UNTRACKED_REASONS[appid]}, so it would get stuck loading. It starts normally "
+                "without achievements.")
+    return ("Not tracked: tracking was turned off for this game, so no achievements are recorded. Most GOG games "
+            "work fine tracked; right-click it and choose “Track this game” to turn it back on.")
+
+
 @dataclass
 class GogGame:
     game_id: int

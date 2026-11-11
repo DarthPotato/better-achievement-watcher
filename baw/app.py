@@ -34,6 +34,7 @@ FILTERS = {
 
 INSTANCE_PORT = install.INSTANCE_PORT
 UPDATE_RECHECK_MS = 6 * 3600 * 1000
+TRACKED_LABEL, UNTRACKED_LABEL = "● On", "○ Off"  # GOG games: is the app standing in for Galaxy
 BURST_LIMIT = 3  # individual popups per batch; the rest are summarised
 
 
@@ -289,17 +290,20 @@ class App:
         chooser = ttk.Combobox(left, textvariable=self.filter, values=list(FILTERS), state="readonly")
         chooser.pack(side="top", fill="x", pady=(0, 4))
         chooser.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
-        self.game_tree = ttk.Treeview(left, columns=("progress",), show="tree headings", selectmode="browse")
+        self.game_tree = ttk.Treeview(left, columns=("progress", "tracking"), show="tree headings", selectmode="browse")
         self.game_tree.heading("#0", text="Game")
         self.game_tree.heading("progress", text="Progress")
         self.game_tree.column("#0", width=230)
         self.game_tree.column("progress", width=80, anchor="center", stretch=False)
+        self.game_tree.heading("tracking", text="GOG")
+        self.game_tree.column("tracking", width=70, anchor="center", stretch=False)
         self.game_tree.pack(side="left", fill="both", expand=True)
         scroll = ttk.Scrollbar(left, command=self.game_tree.yview)
         scroll.pack(side="right", fill="y")
         self.game_tree.configure(yscrollcommand=scroll.set)
         self.game_tree.bind("<<TreeviewSelect>>", self._on_select_game)
         self.game_tree.tag_configure("hidden", foreground="#999")
+        self.game_tree.tag_configure("untracked", foreground="#999")
         self.show_hidden = tk.BooleanVar(value=False)
         self.game_menu = tk.Menu(self.root, tearoff=0)
         self.game_tree.bind("<Button-3>", self._on_game_menu)
@@ -340,6 +344,12 @@ class App:
             schema = GameSchema(appid)
         return schema
 
+    def _tracking_label(self, game: GameProgress) -> str:
+        """GOG games only: whether the app stands in for Galaxy for this game ("" for every other game)."""
+        if not any(s.emulator == gog.SOURCE for s in game.sources):
+            return ""
+        return UNTRACKED_LABEL if game.appid in self.config.gog_untracked else TRACKED_LABEL
+
     def _is_hidden(self, appid: int) -> bool:
         return appid in self.config.hidden_games
 
@@ -358,12 +368,15 @@ class App:
             total = len(schema.achievements) or len(game.achievements)
             iid = str(game.appid)
             wanted.add(iid)
-            values = (f"{len(game.unlocked)}/{total}",)
+            values = (f"{len(game.unlocked)}/{total}", self._tracking_label(game))
             borrowed = self.store.borrowed_by(game.appid, game.achievements)
             title = borrowed or schema.title
             if borrowed:
-                values = (f"{len(game.unlocked)}/{len(game.achievements)}" if game.achievements else "-",)
+                values = (f"{len(game.unlocked)}/{len(game.achievements)}" if game.achievements else "-",
+                          self._tracking_label(game))
             tags = ("hidden",) if self._is_hidden(game.appid) else ()
+            if self._tracking_label(game) == UNTRACKED_LABEL:
+                tags += ("untracked",)
             if iid in existing:
                 self.game_tree.item(iid, text=title, values=values, tags=tags)
                 self.game_tree.move(iid, "", index)
@@ -480,13 +493,7 @@ class App:
         self.game_meta.configure(text=f"AppID {appid}  •  {len(unlocked)} of {total} unlocked  •  "
                                       f"{', '.join(emulators)}  •  names from {schema.source or 'save file'}")
         if appid in self.config.gog_untracked and any(s.emulator == gog.SOURCE for s in game.sources):
-            reason = gog.UNTRACKED_REASONS.get(appid)
-            note = (f"Not tracked: {reason}, so it would get stuck loading. It starts normally without achievements."
-                    if reason else "Not tracked: it starts without achievements.")
-            if appid in gog.NEEDS_HOOK:
-                note += (" Tracking it makes this app attach a fix to the running game (a debugger-style patch of its "
-                         "memory; nothing in its files changes). Windows only.")
-            self.game_meta.configure(text=self.game_meta.cget("text") + f"\n{note} Right-click the game to change this.")
+            self.game_meta.configure(text=self.game_meta.cget("text") + "\n" + gog.untracked_note(appid))
         if borrowed_from:
             recorded = (f"{len(unlocked)} of {total} achievements recorded in the save are shown by their raw names."
                         if total else "Its save hasn't recorded any achievements.")
