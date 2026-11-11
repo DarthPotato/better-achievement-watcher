@@ -129,11 +129,19 @@ Galaxy on your PC. No GOG account, nothing is sent to GOG; unlocks are saved in
   achievements. Older GOG releases without it have nothing to report, with or without Galaxy.
 * The game's achievement keys are read from its own files and matched to the Steam version for
   names and icons. A key the app can't find can't unlock.
-* Tested: Alder's Blood Prologue and Fallout: New Vegas. Bethesda games such as Fallout don't
+* Tested: Alder's Blood Prologue, Fallout: New Vegas and IRON NEST (with the fix below). Bethesda games such as Fallout don't
   award achievements once you've used the console (`~`) in that save.
 * Some games wait for online features (leaderboards) that an offline sign-in can't give, and get
   stuck while loading. Right-click such a game, **Don't track this game**, and it starts normally
-  without achievements. IRON NEST is set that way already.
+  without achievements.
+* **IRON NEST** is one of them: its GOG SDK refuses leaderboard requests unless you're really
+  logged on. It's untracked by default; right-click it and choose **Track this game (attaches a
+  fix to it)**. The app then attaches to the game like a small debugger when it starts and
+  patches the SDK in the game's memory (nothing in its files changes, nothing is sent to GOG),
+  and the game gets past its disclaimer screen. It needs no extra download. A game with
+  anti-tamper protection could refuse to run while attached, and antivirus tools can be wary of
+  programs that attach to other programs; if the fix can't attach, the game just runs without
+  achievements. Tested with IRON NEST only. Details: `research/gog/PEER_FINDINGS.md`.
 * If GOG Galaxy itself is installed and running, it handles the game and the app stays out of
   the way.
 
