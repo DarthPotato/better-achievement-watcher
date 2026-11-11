@@ -111,6 +111,13 @@ write(f"loaded {len(ACHIEVEMENTS)} achievements, first keys {[a[1] for a in ACHI
 
 # ------------------------------------------------------------ handlers (sort 1 = communication service)
 
+LEADERBOARDS = {}
+
+
+def leaderboard_id(key):
+    return LEADERBOARDS.setdefault(key, 0x2000000000000000 + len(LEADERBOARDS) + 1)
+
+
 def handle(type_, payload):
     """Return (response type, payload) or None for no response."""
     fields = decode(payload) if payload else {}
@@ -155,6 +162,25 @@ def handle(type_, payload):
     if type_ == 27:  # CLEAR_USER_ACHIEVEMENT_REQUEST
         UNLOCKED.pop(fields.get(1, [0])[0], None)
         return 28, b""
+    if type_ in (31, 40, 41):  # GET_LEADERBOARDS / ..._BY_KEY / CREATE_LEADERBOARD: empty boards, defined on demand
+        if type_ == 41:
+            key = fields.get(1, [b""])[0].decode("utf-8", "replace")
+            write(f"  leaderboard create {key!r} -> id {leaderboard_id(key)}")
+            return 42, f_fixed64(1, leaderboard_id(key))
+        if type_ == 40:
+            for key in fields.get(1, []):
+                leaderboard_id(key.decode("utf-8", "replace"))
+        write(f"  leaderboards: {list(LEADERBOARDS)}")
+        body = b""
+        for key, lb_id in LEADERBOARDS.items():
+            body += f_bytes(1, f_fixed64(1, lb_id) + f_bytes(2, key) + f_bytes(3, key) + f_varint(4, 2) + f_varint(5, 1))
+        return 32, body
+    if type_ in (33, 34, 35):  # GET_LEADERBOARD_ENTRIES_*: nobody is on the board
+        return 36, f_varint(2, 0)
+    if type_ == 37:  # SET_LEADERBOARD_SCORE_REQUEST: accept it, rank 1
+        score = fields.get(2, [0])[0]
+        write(f"  leaderboard score {score}")
+        return 38, f_varint(1, score) + f_varint(2, 0) + f_varint(3, 1) + f_varint(4, 1)
     if type_ == 43:  # GET_USER_TIME_PLAYED_REQUEST
         return 44, f_varint(1, 0)
     if type_ in (49, 59):  # START_GAME_SESSION / CONFIGURE_ENVIRONMENT
