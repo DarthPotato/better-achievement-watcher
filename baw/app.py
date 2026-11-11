@@ -493,13 +493,7 @@ class App:
         self.game_meta.configure(text=f"AppID {appid}  •  {len(unlocked)} of {total} unlocked  •  "
                                       f"{', '.join(emulators)}  •  names from {schema.source or 'save file'}")
         if appid in self.config.gog_untracked and any(s.emulator == gog.SOURCE for s in game.sources):
-            reason = gog.UNTRACKED_REASONS.get(appid)
-            note = (f"Not tracked: {reason}, so it would get stuck loading. It starts normally without achievements."
-                    if reason else "Not tracked: it starts without achievements.")
-            if appid in gog.NEEDS_HOOK:
-                note += (" Tracking it makes this app attach a fix to the running game (a debugger-style patch of its "
-                         "memory; nothing in its files changes). Windows only.")
-            self.game_meta.configure(text=self.game_meta.cget("text") + f"\n{note} Right-click the game to change this.")
+            self.game_meta.configure(text=self.game_meta.cget("text") + "\n" + gog.untracked_note(appid))
         if borrowed_from:
             recorded = (f"{len(unlocked)} of {total} achievements recorded in the save are shown by their raw names."
                         if total else "Its save hasn't recorded any achievements.")

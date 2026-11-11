@@ -143,5 +143,17 @@ class TrackingIndicatorTests(unittest.TestCase):
         self.assertEqual(App._tracking_label(app, game(2, "Goldberg")), "")
 
 
+class UntrackedNoteTests(unittest.TestCase):
+    def test_wording_depends_on_why_the_game_is_untracked(self):
+        from baw import gog
+
+        hooked = gog.untracked_note(1162687982)
+        self.assertIn("Track this game", hooked)
+        self.assertIn("leaderboards", hooked)
+        other = gog.untracked_note(123)  # e.g. a game the user switched off: nothing is wrong with it
+        self.assertIn("turned off", other)
+        self.assertNotIn("stuck", other)
+
+
 if __name__ == "__main__":
     unittest.main()
