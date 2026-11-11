@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import struct
 import sys
@@ -125,6 +126,21 @@ class HookFallbackTests(unittest.TestCase):
         session, result = self._sign_in(ready=True)
         self.assertEqual(result[0], 4)
         self.assertEqual(session.game.name, "Needs Fix")
+
+
+@unittest.skipUnless(importlib.util.find_spec("tkinter"), "needs Tk")
+class TrackingIndicatorTests(unittest.TestCase):
+    def test_label_only_for_gog_games(self):
+        from types import SimpleNamespace
+
+        from baw import gog
+        from baw.app import TRACKED_LABEL, UNTRACKED_LABEL, App
+
+        app = SimpleNamespace(config=SimpleNamespace(gog_untracked=[2]))
+        game = lambda appid, emulator: SimpleNamespace(appid=appid, sources=[SimpleNamespace(emulator=emulator)])
+        self.assertEqual(App._tracking_label(app, game(1, gog.SOURCE)), TRACKED_LABEL)
+        self.assertEqual(App._tracking_label(app, game(2, gog.SOURCE)), UNTRACKED_LABEL)
+        self.assertEqual(App._tracking_label(app, game(2, "Goldberg")), "")
 
 
 if __name__ == "__main__":
