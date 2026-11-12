@@ -62,8 +62,11 @@ class Config:
     # without a GOG account. Needs a one-time setup (Settings), off by default.
     gog_enabled: bool = False
     # GOG game ids the app doesn't answer for, so they run as without Galaxy (right-click a game to
-    # change it). IRON NEST waits forever for online leaderboards when it gets an offline sign-in.
-    gog_untracked: List[int] = field(default_factory=lambda: [1162687982])  # see gog.UNTRACKED_REASONS
+    # change it). Every GOG game is tracked unless it's listed here.
+    gog_untracked: List[int] = field(default_factory=list)
+    # GOG game ids that get the experimental memory fix (baw/galaxy_hook.py): the app patches the game's
+    # GOG SDK in memory so online-only calls (leaderboards) don't block it. Off unless asked for.
+    gog_fixed: List[int] = field(default_factory=list)
     # Look for a newer release on GitHub at startup (exe builds only).
     check_updates: bool = True
     # Last release version a background popup was shown for, so it's announced only once.
@@ -87,6 +90,10 @@ class Config:
         for key, value in raw.items():
             if key in known:
                 setattr(cfg, key, value)
+        if "gog_fixed" not in raw and isinstance(cfg.gog_untracked, list):
+            # Older configs listed IRON NEST as untracked by default. Games are tracked by default now; the ones
+            # that need the memory fix simply run without achievements until it is switched on.
+            cfg.gog_untracked = [g for g in cfg.gog_untracked if g != 1162687982]
         return cfg
 
     def save(self) -> None:

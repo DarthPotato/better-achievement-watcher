@@ -4,6 +4,7 @@ import struct
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -134,25 +135,48 @@ class TrackingIndicatorTests(unittest.TestCase):
         from types import SimpleNamespace
 
         from baw import gog
-        from baw.app import TRACKED_LABEL, UNTRACKED_LABEL, App
+        from baw.app import FIXED_LABEL, TRACKED_LABEL, UNTRACKED_LABEL, App
 
-        app = SimpleNamespace(config=SimpleNamespace(gog_untracked=[2]))
+        app = SimpleNamespace(config=SimpleNamespace(gog_untracked=[2], gog_fixed=[3]))
         game = lambda appid, emulator: SimpleNamespace(appid=appid, sources=[SimpleNamespace(emulator=emulator)])
         self.assertEqual(App._tracking_label(app, game(1, gog.SOURCE)), TRACKED_LABEL)
         self.assertEqual(App._tracking_label(app, game(2, gog.SOURCE)), UNTRACKED_LABEL)
+        self.assertEqual(App._tracking_label(app, game(3, gog.SOURCE)), FIXED_LABEL)
         self.assertEqual(App._tracking_label(app, game(2, "Goldberg")), "")
+        self.assertIn(gog.FIX_MARK, FIXED_LABEL)
 
 
-class UntrackedNoteTests(unittest.TestCase):
-    def test_wording_depends_on_why_the_game_is_untracked(self):
+class StatusNoteTests(unittest.TestCase):
+    def test_note_depends_on_tracking_and_the_fix(self):
         from baw import gog
 
-        hooked = gog.untracked_note(1162687982)
-        self.assertIn("Track this game", hooked)
-        self.assertIn("leaderboards", hooked)
-        other = gog.untracked_note(123)  # e.g. a game the user switched off: nothing is wrong with it
-        self.assertIn("turned off", other)
-        self.assertNotIn("stuck", other)
+        self.assertIn("Not tracked", gog.status_note(5, False, False))
+        self.assertEqual(gog.status_note(5, True, False), "")  # an ordinary tracked game needs no explanation
+        self.assertIn("experimental", gog.status_note(5, True, True))
+        waiting = gog.status_note(1162687982, True, False)  # known to need the fix, fix still off
+        self.assertIn("leaderboards", waiting)
+        self.assertIn("right-click", waiting)
+
+
+class FixConfigTests(unittest.TestCase):
+    def test_defaults_and_migration_of_old_configs(self):
+        import json
+        import tempfile
+
+        from baw.config import Config
+
+        self.assertEqual((Config().gog_untracked, Config().gog_fixed), ([], []))
+        folder = tempfile.mkdtemp()
+        old = {"gog_enabled": True, "gog_untracked": [1162687982, 55]}  # an older config, before gog_fixed existed
+        (Path(folder) / "config.json").write_text(json.dumps(old), encoding="utf-8")
+        with mock.patch.object(Config, "path", classmethod(lambda cls: Path(folder) / "config.json")):
+            cfg = Config.load()
+            self.assertEqual(cfg.gog_untracked, [55])  # IRON NEST's old default entry goes, user choices stay
+            cfg.gog_fixed = [7]
+            cfg.gog_untracked = [1162687982]
+            cfg.save()
+            again = Config.load()
+            self.assertEqual((again.gog_untracked, again.gog_fixed), ([1162687982], [7]))  # explicit choices kept
 
 
 if __name__ == "__main__":
