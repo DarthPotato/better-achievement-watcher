@@ -35,6 +35,7 @@ FILTERS = {
 INSTANCE_PORT = install.INSTANCE_PORT
 UPDATE_RECHECK_MS = 6 * 3600 * 1000
 TRACKED_LABEL, UNTRACKED_LABEL = "● On", "○ Off"  # GOG games: is the app standing in for Galaxy
+FIXED_LABEL = TRACKED_LABEL + " " + gog.FIX_MARK  # ...and is the experimental memory fix on as well
 BURST_LIMIT = 3  # individual popups per batch; the rest are summarised
 
 
@@ -296,7 +297,7 @@ class App:
         self.game_tree.column("#0", width=230)
         self.game_tree.column("progress", width=80, anchor="center", stretch=False)
         self.game_tree.heading("tracking", text="GOG")
-        self.game_tree.column("tracking", width=70, anchor="center", stretch=False)
+        self.game_tree.column("tracking", width=84, anchor="center", stretch=False)
         self.game_tree.pack(side="left", fill="both", expand=True)
         scroll = ttk.Scrollbar(left, command=self.game_tree.yview)
         scroll.pack(side="right", fill="y")
@@ -305,6 +306,8 @@ class App:
         self.game_tree.tag_configure("hidden", foreground="#999")
         self.game_tree.tag_configure("untracked", foreground="#999")
         self.show_hidden = tk.BooleanVar(value=False)
+        self._track_var = tk.BooleanVar(value=True)  # the GOG switches in the right-click menu
+        self._fix_var = tk.BooleanVar(value=False)
         self.game_menu = tk.Menu(self.root, tearoff=0)
         self.game_tree.bind("<Button-3>", self._on_game_menu)
         panes.add(left, weight=1)
@@ -348,7 +351,9 @@ class App:
         """GOG games only: whether the app stands in for Galaxy for this game ("" for every other game)."""
         if not any(s.emulator == gog.SOURCE for s in game.sources):
             return ""
-        return UNTRACKED_LABEL if game.appid in self.config.gog_untracked else TRACKED_LABEL
+        if game.appid in self.config.gog_untracked:
+            return UNTRACKED_LABEL
+        return FIXED_LABEL if game.appid in self.config.gog_fixed else TRACKED_LABEL
 
     def _is_hidden(self, appid: int) -> bool:
         return appid in self.config.hidden_games
@@ -375,7 +380,7 @@ class App:
                 values = (f"{len(game.unlocked)}/{len(game.achievements)}" if game.achievements else "-",
                           self._tracking_label(game))
             tags = ("hidden",) if self._is_hidden(game.appid) else ()
-            if self._tracking_label(game) == UNTRACKED_LABEL:
+            if game.appid in self.config.gog_untracked and self._tracking_label(game):
                 tags += ("untracked",)
             if iid in existing:
                 self.game_tree.item(iid, text=title, values=values, tags=tags)
@@ -416,11 +421,15 @@ class App:
                 menu.add_command(label="Hide game", command=lambda: self.set_hidden(appid, True))
             game = self.games.get(appid)
             if game and any(s.emulator == gog.SOURCE for s in game.sources):
-                if appid in self.config.gog_untracked:
-                    label = "Track this game (attaches a fix to it)" if appid in gog.NEEDS_HOOK else "Track this game"
-                    menu.add_command(label=label, command=lambda: self.set_gog_tracked(appid, True))
-                else:
-                    menu.add_command(label="Don't track this game", command=lambda: self.set_gog_tracked(appid, False))
+                tracked = appid not in self.config.gog_untracked
+                self._track_var.set(tracked)
+                self._fix_var.set(appid in self.config.gog_fixed)
+                menu.add_separator()
+                menu.add_checkbutton(label="Track this game", variable=self._track_var,
+                                     command=lambda: self.set_gog_tracked(appid, self._track_var.get()))
+                menu.add_checkbutton(label=f"Memory fix {gog.FIX_MARK} (experimental)", variable=self._fix_var,
+                                     state="normal" if tracked else "disabled",
+                                     command=lambda: self.set_gog_fix(appid, self._fix_var.get()))
                 menu.add_command(label="Reset achievements...", command=lambda: self.reset_gog_game(appid))
             menu.add_separator()
         menu.add_checkbutton(label="Show hidden games", variable=self.show_hidden, command=self.refresh)
@@ -435,6 +444,24 @@ class App:
         self.config.gog_untracked = ids if tracked else ids + [appid]
         self.config.save()
         self.refresh()
+
+    def set_gog_fix(self, appid: int, on: bool, confirm: bool = True) -> bool:
+        """Switch the experimental memory fix (galaxy_hook) for one GOG game. False when the user said no."""
+        if on and confirm and not messagebox.askyesno(
+                APP_NAME, "Turn on the experimental memory fix for this game?\n\n"
+                "While the game runs, this app attaches to it like a debugger and patches GOG's SDK in the game's "
+                "memory, so online-only calls (such as leaderboards) don't block it. Nothing in the game's files "
+                "changes and nothing is sent to GOG.\n\nAntivirus tools can be wary of programs that attach to "
+                "other programs, and a game with anti-tamper protection may refuse to run while attached. If the "
+                "fix can't attach, the game just runs without achievements. It takes effect the next time the game "
+                "starts, and you can switch it off again here at any time.", parent=self.root):
+            self.refresh()
+            return False
+        ids = [i for i in self.config.gog_fixed if i != appid]
+        self.config.gog_fixed = ids + [appid] if on else ids
+        self.config.save()
+        self.refresh()
+        return True
 
     def reset_gog_game(self, appid: int) -> None:
         title = self._schema(appid).title
@@ -492,8 +519,10 @@ class App:
         emulators = sorted({s.emulator for s in game.sources})
         self.game_meta.configure(text=f"AppID {appid}  •  {len(unlocked)} of {total} unlocked  •  "
                                       f"{', '.join(emulators)}  •  names from {schema.source or 'save file'}")
-        if appid in self.config.gog_untracked and any(s.emulator == gog.SOURCE for s in game.sources):
-            self.game_meta.configure(text=self.game_meta.cget("text") + "\n" + gog.untracked_note(appid))
+        if any(s.emulator == gog.SOURCE for s in game.sources):
+            note = gog.status_note(appid, appid not in self.config.gog_untracked, appid in self.config.gog_fixed)
+            if note:
+                self.game_meta.configure(text=self.game_meta.cget("text") + "\n" + note)
         if borrowed_from:
             recorded = (f"{len(unlocked)} of {total} achievements recorded in the save are shown by their raw names."
                         if total else "Its save hasn't recorded any achievements.")
@@ -545,9 +574,9 @@ class App:
         return "\u25cf Set up, starting...", "#b35900"
 
     def _hooked_folders(self) -> List[Path]:
-        """Install folders of tracked games that only work with galaxy_hook attached."""
+        """Install folders of tracked games that have the memory fix switched on."""
         return [Path(game.folder) for game in list(self.watcher.gog_games.values())
-                if game.game_id in gog.NEEDS_HOOK and game.game_id not in self.config.gog_untracked]
+                if game.game_id in self.config.gog_fixed and game.game_id not in self.config.gog_untracked]
 
     def stop_gog(self) -> None:
         if self.gog_hooks is not None:
@@ -748,6 +777,8 @@ class SettingsDialog:
                             variable=self.gog).pack(side="left")
             state, colour = app.gog_state()
             ttk.Label(gog_row, text=state, foreground=colour).pack(side="left", padx=(8, 0))
+            ttk.Label(body, text=gog.SETTINGS_HELP.format(mark=gog.FIX_MARK), wraplength=520, justify="left",
+                      foreground="#666").pack(anchor="w", padx=(22, 0), pady=(0, 4))
 
         ttk.Label(body, text="Checked locations:").pack(anchor="w", pady=(8, 0))
         info = tk.Text(body, height=6, wrap="none", font=("Consolas", 9))

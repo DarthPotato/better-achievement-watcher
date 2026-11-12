@@ -785,7 +785,7 @@ class GogUntrackedTests(unittest.TestCase):
         from baw import gog
         from baw.galaxy_service import GalaxyService
 
-        self.assertIn(1162687982, Config().gog_untracked)  # IRON NEST is off by default
+        self.assertEqual(Config().gog_untracked, [])  # every GOG game is tracked by default
         folder = Path(tempfile.mkdtemp(dir=TMP)) / "G"
         write(folder / "goggame-77.info", {"gameId": "77", "clientId": "123", "name": "G"})
         write(folder / "Galaxy64.dll", "")

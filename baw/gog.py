@@ -39,25 +39,35 @@ _lock = threading.RLock()
 
 SteamLookup = Callable[[int], Optional[GameSchema]]
 
-# Games known to get stuck with an offline Galaxy sign-in, and why (untracked by default).
+# Games known to get stuck with an offline Galaxy sign-in, and why.
 UNTRACKED_REASONS = {
     1162687982: "it waits for online leaderboards, which need a real GOG login",  # IRON NEST
 }
-# ...of those, the ones galaxy_hook can get going: tracking them attaches the fix to the running game.
+# ...of those, the ones galaxy_hook can get going. Tracked without the memory fix they start without achievements.
 NEEDS_HOOK = {1162687982}
+FIX_MARK = "⚙"  # gear: marks the experimental memory fix in the viewer
+SETTINGS_HELP = (
+    "Every GOG game is tracked by default. Right-click a game in the list to stop tracking it, or to switch on the "
+    "experimental memory fix ({mark}). A few games (IRON NEST) wait for online features that need a real GOG login "
+    "and get stuck; with the fix on, the app patches their GOG SDK in the game's memory while they run so they can "
+    "start. It's off for every game until you switch it on, changes nothing in the game's files, sends nothing to "
+    "GOG, and takes effect the next time the game starts.")
 
 
-def untracked_note(appid: int) -> str:
-    """Why an untracked GOG game shows no achievements, for the viewer (most games work fine when tracked)."""
+def status_note(appid: int, tracked: bool, fixed: bool) -> str:
+    """One or two sentences for the viewer: what tracking / the memory fix means for this game ("" = nothing to say)."""
+    if not tracked:
+        return ("Not tracked: the app isn't standing in for Galaxy for this game, so it runs without achievements. "
+                "Switch tracking on from the right-click menu.")
+    if fixed:
+        return (f"{FIX_MARK} Memory fix on (experimental): while the game runs, the app patches its GOG SDK in the "
+                "game's memory so online-only calls such as leaderboards don't block it. Nothing in the game's files "
+                "changes and nothing is sent to GOG. If anything misbehaves, switch it off from the right-click menu.")
     if appid in NEEDS_HOOK:
-        return (f"Not tracked: {UNTRACKED_REASONS.get(appid, 'it can get stuck loading')}. Right-click it and choose "
-                "“Track this game” to attach a fix to the running game; left off, it starts normally "
-                "without achievements.")
-    if appid in UNTRACKED_REASONS:
-        return (f"Not tracked: {UNTRACKED_REASONS[appid]}, so it would get stuck loading. It starts normally "
-                "without achievements.")
-    return ("Not tracked: tracking was turned off for this game, so no achievements are recorded. Most GOG games "
-            "work fine tracked; right-click it and choose “Track this game” to turn it back on.")
+        reason = UNTRACKED_REASONS.get(appid, "it needs online features")
+        return (f"This game won't record achievements yet: {reason}. It starts normally without them. Switch on the "
+                f"memory fix ({FIX_MARK}, experimental) from the right-click menu to make it work.")
+    return ""
 
 
 @dataclass
