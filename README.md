@@ -131,11 +131,12 @@ Galaxy on your PC. No GOG account, nothing is sent to GOG; unlocks are saved in
   names and icons. A key the app can't find can't unlock.
 * Tested: Alder's Blood Prologue, Fallout: New Vegas and IRON NEST (with the memory fix). Bethesda games such as Fallout don't
   award achievements once you've used the console (`~`) in that save.
-* Every GOG game is tracked by default (a **GOG** column in the game list shows `● On` or `○ Off`).
+* Every GOG game is tracked by default. A small **GOG** badge in the game list shows it: purple when tracked,
+  grey (and the row greyed) when not.
   Right-click a game to stop tracking it: it then starts normally without achievements.
 * Some games wait for online features (leaderboards) that an offline sign-in can't give, and get
   stuck while loading. **IRON NEST** is one. For those, right-click the game and switch on the
-  experimental **Memory fix** (marked with a gear in the list). While the game runs, the app attaches
+  experimental **Memory fix** (a gear after the game's name in the list). While the game runs, the app attaches
   to it like a small debugger and patches GOG's SDK in the game's memory so the request goes
   through; nothing in the game's files changes, nothing is sent to GOG, and no extra download is
   needed. It's off for every game until you switch it on, and it applies the next time the game

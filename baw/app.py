@@ -34,8 +34,14 @@ FILTERS = {
 
 INSTANCE_PORT = install.INSTANCE_PORT
 UPDATE_RECHECK_MS = 6 * 3600 * 1000
-TRACKED_LABEL, UNTRACKED_LABEL = "● On", "○ Off"  # GOG games: is the app standing in for Galaxy
-FIXED_LABEL = TRACKED_LABEL + " " + gog.FIX_MARK  # ...and is the experimental memory fix on as well
+# GOG games get a small badge in the game list: purple = the app stands in for Galaxy, grey = not tracked.
+BADGE_SIZE = (19, 13)
+BADGE_COLOURS = {"on": "#86328a", "fix": "#86328a", "off": "#8c8c8c"}
+BADGE_TEXT = ("111" "0" "111" "0" "111",  # "GOG" in a 3x5 pixel font, one letter after the other
+              "100" "0" "101" "0" "100",
+              "101" "0" "101" "0" "101",
+              "101" "0" "101" "0" "101",
+              "111" "0" "111" "0" "111")
 BURST_LIMIT = 3  # individual popups per batch; the rest are summarised
 
 
@@ -74,6 +80,7 @@ class App:
         self.games: Dict[int, GameProgress] = {}
         self.selected_appid: Optional[int] = None
         self._images: Dict[str, object] = {}
+        self._badges: Dict[str, object] = {}
         self._schema_requested: set = set()
         self._listener: Optional[socket.socket] = None
         self.galaxy: Optional[GalaxyService] = None
@@ -291,13 +298,11 @@ class App:
         chooser = ttk.Combobox(left, textvariable=self.filter, values=list(FILTERS), state="readonly")
         chooser.pack(side="top", fill="x", pady=(0, 4))
         chooser.bind("<<ComboboxSelected>>", lambda _e: self.refresh())
-        self.game_tree = ttk.Treeview(left, columns=("progress", "tracking"), show="tree headings", selectmode="browse")
+        self.game_tree = ttk.Treeview(left, columns=("progress",), show="tree headings", selectmode="browse")
         self.game_tree.heading("#0", text="Game")
         self.game_tree.heading("progress", text="Progress")
-        self.game_tree.column("#0", width=230)
-        self.game_tree.column("progress", width=80, anchor="center", stretch=False)
-        self.game_tree.heading("tracking", text="GOG")
-        self.game_tree.column("tracking", width=84, anchor="center", stretch=False)
+        self.game_tree.column("#0", width=258)
+        self.game_tree.column("progress", width=68, anchor="center", stretch=False)
         self.game_tree.pack(side="left", fill="both", expand=True)
         scroll = ttk.Scrollbar(left, command=self.game_tree.yview)
         scroll.pack(side="right", fill="y")
@@ -347,13 +352,36 @@ class App:
             schema = GameSchema(appid)
         return schema
 
-    def _tracking_label(self, game: GameProgress) -> str:
-        """GOG games only: whether the app stands in for Galaxy for this game ("" for every other game)."""
+    def _gog_state(self, game: GameProgress) -> str:
+        """"" for games that aren't GOG games, else "on" (tracked), "fix" (tracked + memory fix) or "off"."""
         if not any(s.emulator == gog.SOURCE for s in game.sources):
             return ""
         if game.appid in self.config.gog_untracked:
-            return UNTRACKED_LABEL
-        return FIXED_LABEL if game.appid in self.config.gog_fixed else TRACKED_LABEL
+            return "off"
+        return "fix" if game.appid in self.config.gog_fixed else "on"
+
+    def _badge(self, state: str):
+        """Small GOG badge for the game list (drawn in code; "" gives an empty spacer so titles stay aligned)."""
+        if state not in self._badges:
+            width, height = BADGE_SIZE
+            image = tk.PhotoImage(width=width, height=height, master=self.root)
+            if state:
+                colour = BADGE_COLOURS[state]
+                hollow = state == "off"  # shape as well as colour: untracked is an outline, tracked is solid
+                for y in range(height):
+                    for x in range(width):
+                        edge = min(x, width - 1 - x) == 0 or min(y, height - 1 - y) == 0
+                        corner = min(x, width - 1 - x) + min(y, height - 1 - y) < 2  # rounded corners
+                        if not corner and (edge or not hollow):
+                            image.put(colour, (x, y))
+                left = (width - len(BADGE_TEXT[0])) // 2
+                top = (height - len(BADGE_TEXT)) // 2
+                for row, bits in enumerate(BADGE_TEXT):
+                    for col, bit in enumerate(bits):
+                        if bit == "1":
+                            image.put(colour if hollow else "white", (left + col, top + row))
+            self._badges[state] = image
+        return self._badges[state]
 
     def _is_hidden(self, appid: int) -> bool:
         return appid in self.config.hidden_games
@@ -373,20 +401,23 @@ class App:
             total = len(schema.achievements) or len(game.achievements)
             iid = str(game.appid)
             wanted.add(iid)
-            values = (f"{len(game.unlocked)}/{total}", self._tracking_label(game))
+            values = (f"{len(game.unlocked)}/{total}",)
             borrowed = self.store.borrowed_by(game.appid, game.achievements)
             title = borrowed or schema.title
             if borrowed:
-                values = (f"{len(game.unlocked)}/{len(game.achievements)}" if game.achievements else "-",
-                          self._tracking_label(game))
+                values = (f"{len(game.unlocked)}/{len(game.achievements)}" if game.achievements else "-",)
+            state = self._gog_state(game)
+            if state == "fix":
+                title += f"  {gog.FIX_MARK}"
             tags = ("hidden",) if self._is_hidden(game.appid) else ()
-            if game.appid in self.config.gog_untracked and self._tracking_label(game):
+            if state == "off":
                 tags += ("untracked",)
+            badge = self._badge(state)
             if iid in existing:
-                self.game_tree.item(iid, text=title, values=values, tags=tags)
+                self.game_tree.item(iid, text=title, values=values, tags=tags, image=badge)
                 self.game_tree.move(iid, "", index)
             else:
-                self.game_tree.insert("", index, iid=iid, text=title, values=values, tags=tags)
+                self.game_tree.insert("", index, iid=iid, text=title, values=values, tags=tags, image=badge)
         for iid in existing - wanted:
             self.game_tree.delete(iid)
         files = sum(len(g.sources) for g in self.games.values())
