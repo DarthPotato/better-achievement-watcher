@@ -131,19 +131,38 @@ class HookFallbackTests(unittest.TestCase):
 
 @unittest.skipUnless(importlib.util.find_spec("tkinter"), "needs Tk")
 class TrackingIndicatorTests(unittest.TestCase):
-    def test_label_only_for_gog_games(self):
+    def test_state_only_for_gog_games(self):
         from types import SimpleNamespace
 
         from baw import gog
-        from baw.app import FIXED_LABEL, TRACKED_LABEL, UNTRACKED_LABEL, App
+        from baw.app import App
 
         app = SimpleNamespace(config=SimpleNamespace(gog_untracked=[2], gog_fixed=[3]))
         game = lambda appid, emulator: SimpleNamespace(appid=appid, sources=[SimpleNamespace(emulator=emulator)])
-        self.assertEqual(App._tracking_label(app, game(1, gog.SOURCE)), TRACKED_LABEL)
-        self.assertEqual(App._tracking_label(app, game(2, gog.SOURCE)), UNTRACKED_LABEL)
-        self.assertEqual(App._tracking_label(app, game(3, gog.SOURCE)), FIXED_LABEL)
-        self.assertEqual(App._tracking_label(app, game(2, "Goldberg")), "")
-        self.assertIn(gog.FIX_MARK, FIXED_LABEL)
+        self.assertEqual(App._gog_state(app, game(1, gog.SOURCE)), "on")
+        self.assertEqual(App._gog_state(app, game(2, gog.SOURCE)), "off")
+        self.assertEqual(App._gog_state(app, game(3, gog.SOURCE)), "fix")
+        self.assertEqual(App._gog_state(app, game(2, "Goldberg")), "")
+
+    def test_badges_are_drawn_for_every_state(self):
+        import tkinter as tk
+
+        from baw.app import BADGE_SIZE, App
+
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            self.skipTest("no display")
+        try:
+            app = type("A", (), {})()
+            app.root, app._badges = root, {}
+            for state in ("on", "off", "fix", ""):
+                image = App._badge(app, state)
+                self.assertEqual((image.width(), image.height()), BADGE_SIZE)
+            self.assertIsNot(App._badge(app, "on"), App._badge(app, "off"))
+            self.assertIs(App._badge(app, "on"), App._badge(app, "on"))  # cached, and kept alive for Tk
+        finally:
+            root.destroy()
 
 
 class StatusNoteTests(unittest.TestCase):
