@@ -785,6 +785,7 @@ class SettingsDialog:
             ("Popup seconds", ttk.Entry(grid, textvariable=self.seconds, width=8)),
             ("Popup size (1.0 = normal)", ttk.Entry(grid, textvariable=self.scale, width=8)),
             ("Sound", self._sound_row(grid)),
+            ("Sound volume", self._volume_row(grid)),
         ]
         for r, (label, widget) in enumerate(rows):
             ttk.Label(grid, text=label).grid(row=r, column=0, sticky="w", pady=2)
@@ -864,12 +865,25 @@ class SettingsDialog:
             ttk.Label(row, text="(Steam not found - uses the chime)", foreground="#888").pack(side="left")
         return row
 
+    def _volume_row(self, parent) -> ttk.Frame:
+        row = ttk.Frame(parent)
+        self.volume = tk.IntVar(value=int(getattr(self.app.config, "sound_volume", 100)))
+        shown = ttk.Label(row, width=5)
+        scale = ttk.Scale(row, from_=10, to=100, orient="horizontal", length=180,
+                          command=lambda v: (self.volume.set(int(float(v))), shown.configure(text=f"{self.volume.get()}%")))
+        scale.set(self.volume.get())
+        scale.pack(side="left")
+        shown.configure(text=f"{self.volume.get()}%")
+        shown.pack(side="left", padx=6)
+        return row
+
     def _sound_settings(self) -> dict:
         label = self.sound_choice.get()
         style = next((k for k, v in self.SOUND_LABELS.items() if v == label), "steam")
+        volume = int(self.volume.get()) if hasattr(self, "volume") else self.app.config.sound_volume
         if style == "custom":
-            return {"sound_style": "steam", "sound_file": self.sound_file}
-        return {"sound_style": style, "sound_file": ""}
+            return {"sound_style": "steam", "sound_file": self.sound_file, "sound_volume": volume}
+        return {"sound_style": style, "sound_file": "", "sound_volume": volume}
 
     def _folder_list(self, parent, label: str, values: List[str]) -> tk.Listbox:
         ttk.Label(parent, text=label).pack(anchor="w")
