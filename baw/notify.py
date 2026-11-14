@@ -80,21 +80,30 @@ def _chime_path() -> Path:
     return path
 
 
-def steam_sound() -> Optional[Path]:
+# Steam's UI plays desktop_toast_default for achievements on the desktop and
+# deck_ui_achievement_toast in Big Picture / on the Steam Deck (steamui/sp.js, ToastAchievement).
+STEAM_SOUNDS = {"steam": "desktop_toast_default.wav", "steam_deck": "deck_ui_achievement_toast.wav"}
+
+
+def steam_sound(style: str = "steam") -> Optional[Path]:
     """Steam's own achievement sound, if Steam is installed. It isn't redistributed with
     this app; it's played straight from your Steam folder."""
     steam = steam_install_dir()
     if steam is None:
         return None
-    path = steam / "steamui" / "sounds" / "deck_ui_achievement_toast.wav"
-    return path if path.is_file() else None
+    folder = steam / "steamui" / "sounds"
+    preferred = STEAM_SOUNDS.get(style, STEAM_SOUNDS["steam"])
+    for name in (preferred, *STEAM_SOUNDS.values()):  # the other one if Steam renamed one
+        if (folder / name).is_file():
+            return folder / name
+    return None
 
 
 def sound_path(config: Config) -> Path:
     if config.sound_file and Path(config.sound_file).is_file():
         return Path(config.sound_file)
-    if config.sound_style == "steam":
-        steam = steam_sound()
+    if config.sound_style in STEAM_SOUNDS:
+        steam = steam_sound(config.sound_style)
         if steam:
             return steam
     return _chime_path()

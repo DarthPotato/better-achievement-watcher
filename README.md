@@ -60,7 +60,8 @@ Click **Test popup** to confirm popups show up, then just play. In **Settings**:
   installed games are listed. Tick *...including uninstalled games* to also list games
   you played and uninstalled.
 * **Sound**: Steam's own achievement sound, played straight from your Steam install
-  (`steamui\sounds\deck_ui_achievement_toast.wav`; it isn't bundled with this app).
+  (`steamui\sounds\desktop_toast_default.wav`, what the desktop client plays; the Steam Deck /
+  Big Picture version `deck_ui_achievement_toast.wav` can be picked too. Neither is bundled with this app).
   If Steam isn't installed it uses a built-in chime. You can also pick any `.wav`.
 * **Start with Windows**: runs it hidden in the background at login. Popups still show,
   and launching the app again opens the window.

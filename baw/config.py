@@ -53,7 +53,7 @@ class Config:
     sound: bool = True
     # "steam": Steam's own achievement sound, taken from your Steam install
     # (falls back to the chime if Steam isn't installed). "chime": the built-in sound.
-    sound_style: str = "steam"
+    sound_style: str = "steam"  # "steam" (desktop client), "steam_deck" (Big Picture), "chime"
     # Optional custom .wav; overrides sound_style when set.
     sound_file: str = ""
     # Closing the window keeps watching in the background (run the app again to reopen it).
