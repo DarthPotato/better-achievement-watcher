@@ -27,11 +27,22 @@ try:
 except ImportError:  # icons are optional
     Image = ImageTk = None
 
-BG = "#1b2838"
-BG_ACCENT = "#2a475e"
+# "Steam classic": Steam's older achievement toast.
+BG = "#243441"
+BG_ACCENT = "#34495a"
 FG = "#ffffff"
 FG_DIM = "#8f98a0"
 GOLD = "#e5b143"
+
+# "Purple": a purple card with a rarity badge and a glow for rare achievements.
+STEAM_BG = "#2e1d2f"
+STEAM_BORDER = "#5c3a5d"
+STEAM_HEADER = "#b9a9ba"
+STEAM_DESC = "#e3d8e4"
+STEAM_BADGE = "#6b3fa6"
+STEAM_GLOW = (255, 186, 64)
+RARE_PERCENT = 10.0  # Steam makes achievements rarer than this glow
+POPUP_STYLES = {"classic": "Steam (blue)", "purple": "Purple with rarity badge"}
 
 
 @dataclass
@@ -201,6 +212,77 @@ def _make_unobtrusive(win: tk.Toplevel, foreground_before: int) -> None:
         pass
 
 
+def _round_rect(canvas: tk.Canvas, x1: int, y1: int, x2: int, y2: int, r: int, **kw) -> int:
+    points = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
+              x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+    return canvas.create_polygon(points, smooth=True, **kw)
+
+
+def _elide(text: str, font, width: int) -> str:
+    if font.measure(text) <= width:
+        return text
+    while text and font.measure(text + "\u2026") > width:
+        text = text[:-1]
+    return text.rstrip() + "\u2026"
+
+
+def _fit_lines(text: str, font, width: int, lines: int) -> str:
+    """Word-wrap to at most `lines` lines, ending in an ellipsis if it had to cut."""
+    out, current = [], ""
+    for word in text.split():
+        candidate = f"{current} {word}".strip()
+        if font.measure(candidate) <= width:
+            current = candidate
+            continue
+        if current:
+            out.append(current)
+        current = word
+        if len(out) == lines:
+            break
+    if current and len(out) < lines:
+        out.append(current)
+    if out and len(" ".join(out)) < len(" ".join(text.split())):  # cut short: end on an ellipsis
+        last = out[-1]
+        while last and font.measure(last + "\u2026") > width:
+            last = last[:-1]
+        out[-1] = last.rstrip() + "\u2026"
+    return "\n".join(out)
+
+
+def _glow_image(size: int, spread: int):
+    """A soft golden halo around the icon (Steam's rare-achievement glow). Needs Pillow."""
+    if ImageTk is None:
+        return None
+    try:
+        from PIL import ImageDraw, ImageFilter
+
+        total = size + 2 * spread
+        img = Image.new("RGBA", (total, total), (0, 0, 0, 0))
+        ImageDraw.Draw(img).rectangle([spread // 2, spread // 2, total - spread // 2, total - spread // 2],
+                                      fill=STEAM_GLOW + (200,))
+        return ImageTk.PhotoImage(img.filter(ImageFilter.GaussianBlur(spread / 2.2)))
+    except Exception:
+        return None
+
+
+def _round_corners(win: tk.Toplevel, width: int, height: int, radius: int) -> None:
+    """Clip the window to a rounded rectangle (Windows only; square elsewhere)."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        user32, gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
+        user32.GetParent.restype = ctypes.c_void_p
+        gdi32.CreateRoundRectRgn.restype = ctypes.c_void_p
+        user32.SetWindowRgn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int]
+        hwnd = user32.GetParent(win.winfo_id()) or win.winfo_id()
+        region = gdi32.CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2)
+        user32.SetWindowRgn(hwnd, region, True)  # Windows owns the region from here
+    except Exception:
+        pass
+
+
 def enable_dpi_awareness() -> None:
     """Crisp text on scaled (125%/150%) Windows displays. Call before creating Tk."""
     if sys.platform != "win32":
@@ -242,6 +324,12 @@ class Notifier:
         self._create(spec)
 
     def _create(self, spec: PopupSpec) -> None:
+        if getattr(self.config, "popup_style", "classic") == "purple":
+            try:
+                self._create_purple(spec)
+                return
+            except tk.TclError:
+                pass  # fall back to the classic look rather than lose the popup
         dpi = max(1.0, self.root.winfo_fpixels("1i") / 96.0)
         scale = max(0.5, float(self.config.popup_scale or 1.0)) * dpi
         width, height, icon_size = int(350 * scale), int(106 * scale), int(64 * scale)
@@ -270,8 +358,11 @@ class Notifier:
                  anchor="w").place(x=text_x, y=int(9 * scale), width=wrap)
         tk.Label(win, text=spec.title, font=("Segoe UI", -int(15 * scale), "bold"), fg=FG, bg=BG, anchor="w").place(
             x=text_x, y=int(25 * scale), width=wrap)
-        details = spec.description
-        tk.Label(win, text=details, font=("Segoe UI", -int(12 * scale)), fg=FG_DIM, bg=BG, anchor="nw",
+        from tkinter import font as tkfont
+
+        desc_font = tkfont.Font(root=self.root, family="Segoe UI", size=-int(12 * scale))
+        details = _fit_lines(spec.description, desc_font, wrap, 2)
+        tk.Label(win, text=details, font=desc_font, fg=FG_DIM, bg=BG, anchor="nw",
                  justify="left", wraplength=wrap).place(x=text_x, y=int(47 * scale), width=wrap, height=int(36 * scale))
         footer = spec.game
         if spec.percent is not None:
@@ -279,14 +370,82 @@ class Notifier:
         tk.Label(win, text=footer, font=("Segoe UI", -int(10 * scale)), fg=GOLD if spec.percent is not None and
                  spec.percent < 10 else FG_DIM, bg=BG, anchor="w").place(x=text_x, y=height - int(20 * scale), width=wrap)
 
+        self._show(win, width, height, foreground)
+
+    def _show(self, win: tk.Toplevel, width: int, height: int, foreground: int, radius: int = 0) -> None:
         win.geometry(f"{width}x{height}+{-10000}+{-10000}")
         self._visible.append(win)
         self._layout(width, height)
         win.update_idletasks()
         _make_unobtrusive(win, foreground)
+        if radius:
+            _round_corners(win, width, height, radius)
         play_sound(self.config)
         self._fade(win, 0.0, 0.08)
         win.after(int(float(self.config.popup_seconds) * 1000), lambda: self._fade(win, 0.96, -0.08, close=True))
+
+    def _create_purple(self, spec: PopupSpec) -> None:
+        """Purple card: 'Achievement unlocked' header, icon with a rarity badge and a golden glow
+        for rare achievements, then the name and description."""
+        from tkinter import font as tkfont
+
+        dpi = max(1.0, self.root.winfo_fpixels("1i") / 96.0)
+        s = max(0.5, float(self.config.popup_scale or 1.0)) * dpi
+        width, height, radius = int(392 * s), int(136 * s), int(12 * s)
+        icon_size, icon_x, icon_y = int(58 * s), int(21 * s), int(52 * s)
+        text_x = int(114 * s)
+        wrap = width - text_x - int(18 * s)
+        foreground = _foreground_window()
+
+        win = tk.Toplevel(self.root)
+        win.overrideredirect(True)
+        try:
+            win.attributes("-topmost", True)
+            win.attributes("-alpha", 0.0)
+        except tk.TclError:
+            pass
+        canvas = tk.Canvas(win, width=width, height=height, bg=STEAM_BG, highlightthickness=0, bd=0)
+        canvas.place(x=0, y=0)
+        _round_rect(canvas, 1, 1, width - 2, height - 2, radius, outline=STEAM_BORDER, width=max(2, int(2 * s)),
+                    fill=STEAM_BG)
+
+        header_font = ("Segoe UI", -int(12 * s))
+        canvas.create_text(int(26 * s), int(27 * s), text="🏆", font=("Segoe UI Emoji", -int(11 * s)),
+                           fill=STEAM_HEADER, anchor="w")
+        canvas.create_text(int(46 * s), int(27 * s), text=spec.header.capitalize() if spec.header.isupper() else spec.header,
+                           font=header_font, fill=STEAM_HEADER, anchor="w")
+
+        rare = spec.percent is not None and spec.percent < RARE_PERCENT
+        images = []
+        if rare:
+            glow = _glow_image(icon_size, int(14 * s))
+            if glow is not None:
+                images.append(glow)
+                canvas.create_image(icon_x + icon_size // 2, icon_y + icon_size // 2, image=glow)
+        icon = load_icon(spec.icon, icon_size)
+        if icon is not None:
+            images.append(icon)
+            canvas.create_image(icon_x, icon_y, image=icon, anchor="nw")
+        else:
+            canvas.create_text(icon_x + icon_size // 2, icon_y + icon_size // 2, text="🏆",
+                               font=("Segoe UI Emoji", -int(34 * s)), fill=GOLD)
+        if spec.percent is not None:
+            label = f"{spec.percent:.1f}%" if spec.percent < 1 else f"{spec.percent:.0f}%"
+            badge_font = ("Segoe UI", -int(11 * s), "bold")
+            text_w = tkfont.Font(root=self.root, font=badge_font).measure(label)
+            bw, bh = text_w + int(12 * s), int(17 * s)
+            bx, by = icon_x + icon_size // 2 - bw // 2, icon_y + icon_size - bh // 2
+            _round_rect(canvas, bx, by, bx + bw, by + bh, bh // 2, fill=STEAM_BADGE, outline="")
+            canvas.create_text(bx + bw // 2, by + bh // 2, text=label, font=badge_font, fill="#ffffff")
+
+        title_font = tkfont.Font(root=self.root, family="Segoe UI", size=-int(19 * s))
+        canvas.create_text(text_x, int(61 * s), text=_elide(spec.title, title_font, wrap), font=title_font,
+                           fill="#ffffff", anchor="w")
+        desc_font = tkfont.Font(root=self.root, family="Segoe UI", size=-int(13 * s))
+        canvas.create_text(text_x, int(78 * s), text=_fit_lines(spec.description, desc_font, wrap, 3), font=desc_font,
+                           fill=STEAM_DESC, anchor="nw", width=wrap)
+        win._images = images  # keep references so Tk doesn't drop them
+        self._show(win, width, height, foreground, radius)
 
     def _layout(self, width: int, height: int) -> None:
         screen_w, screen_h = self.root.winfo_screenwidth(), self.root.winfo_screenheight()

@@ -24,7 +24,6 @@ import re
 import struct
 import sys
 import threading
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple

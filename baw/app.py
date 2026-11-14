@@ -15,7 +15,7 @@ from . import APP_NAME, __version__, galaxy_hook, gog, gog_setup, install, start
 from .winicon import shield_image
 from .galaxy_service import GalaxyService
 from .config import Config
-from .notify import Notifier, PopupSpec, demo_spec, enable_dpi_awareness, load_icon
+from .notify import POPUP_STYLES, Notifier, PopupSpec, demo_spec, enable_dpi_awareness, load_icon
 from .parsers import AchievementState
 from .locations import steam_install_dir
 from .notify import play_sound, steam_sound
@@ -764,6 +764,7 @@ class SettingsDialog:
         self.language = tk.StringVar(value=cfg.language)
         self.api_key = tk.StringVar(value=cfg.steam_api_key)
         self.position = tk.StringVar(value=cfg.popup_position)
+        self.popup_style = tk.StringVar(value=POPUP_STYLES.get(cfg.popup_style, POPUP_STYLES["classic"]))
         self.seconds = tk.StringVar(value=str(cfg.popup_seconds))
         self.scale = tk.StringVar(value=str(cfg.popup_scale))
         self.sound = tk.BooleanVar(value=cfg.sound)
@@ -780,6 +781,8 @@ class SettingsDialog:
         rows = [
             ("Language (Steam name, e.g. english, german, french)", ttk.Entry(grid, textvariable=self.language)),
             ("Steam Web API key (optional, rarely needed)", ttk.Entry(grid, textvariable=self.api_key, show="*")),
+            ("Popup style", ttk.Combobox(grid, textvariable=self.popup_style, state="readonly",
+                                         values=list(POPUP_STYLES.values()))),
             ("Popup position", ttk.Combobox(grid, textvariable=self.position, state="readonly",
                                             values=["bottom-right", "bottom-left", "top-right", "top-left"])),
             ("Popup seconds", ttk.Entry(grid, textvariable=self.seconds, width=8)),
@@ -924,6 +927,7 @@ class SettingsDialog:
         cfg.language = language
         cfg.steam_api_key = self.api_key.get().strip()
         cfg.popup_position = self.position.get()
+        cfg.popup_style = next((k for k, v in POPUP_STYLES.items() if v == self.popup_style.get()), "classic")
         cfg.sound = self.sound.get()
         cfg.scan_default_locations = self.defaults.get()
         cfg.keep_running_on_close = self.keep.get()

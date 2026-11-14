@@ -50,6 +50,7 @@ class Config:
     popup_seconds: float = 6.0
     popup_position: str = "bottom-right"  # bottom-right | bottom-left | top-right | top-left
     popup_scale: float = 1.0
+    popup_style: str = "classic"  # "classic" (Steam's blue toast) | "purple" (purple card with a rarity badge)
     sound: bool = True
     # "steam": Steam's own achievement sound, taken from your Steam install
     # (falls back to the chime if Steam isn't installed). "chime": the built-in sound.
