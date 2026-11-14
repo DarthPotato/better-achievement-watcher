@@ -65,7 +65,9 @@ Click **Test popup** to confirm popups show up, then just play. In **Settings**:
   If Steam isn't installed it uses a built-in chime. You can also pick any `.wav`.
 * **Start with Windows**: runs it hidden in the background at login. Popups still show,
   and launching the app again opens the window.
-* Language, popup corner, size, duration, and sound.
+* **Popup style**: Steam's blue achievement toast (default), or a purple card with a rarity
+  badge and a golden glow for rare achievements.
+* Language, popup corner, size, duration, sound and its volume.
 
 Right-click a game in the list to **hide** it, e.g. saves left behind by a game you
 uninstalled. Right-click → **Show hidden games** brings them back. Hidden games still

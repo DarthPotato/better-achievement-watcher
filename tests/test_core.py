@@ -930,3 +930,28 @@ class SoundVolumeTests(unittest.TestCase):
         self.assertAlmostEqual(peak(half), peak(full) / 2, delta=50)
         self.assertEqual(custom, quiet)  # someone's own file is played as it is at 100%
         self.assertEqual(peak(quiet), 6000)  # the Steam file itself is never changed
+
+
+@unittest.skipUnless(importlib.util.find_spec("tkinter"), "needs Tk")
+class PopupTextTests(unittest.TestCase):
+    def test_description_is_cut_to_whole_lines_with_an_ellipsis(self):
+        import tkinter as tk
+        from tkinter import font as tkfont
+
+        from baw import notify
+
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            self.skipTest("no display")
+        try:
+            font = tkfont.Font(root=root, family="Segoe UI", size=-12)
+            long = "Sink a nanban trade ship or the flagship vessel the Nihon Maru during a naval battle " * 3
+            fitted = notify._fit_lines(long, font, 250, 2)
+            self.assertEqual(len(fitted.split("\n")), 2)
+            self.assertTrue(fitted.endswith("…"))
+            self.assertTrue(all(font.measure(line) <= 250 for line in fitted.split("\n")))
+            self.assertEqual(notify._fit_lines("Short one.", font, 250, 2), "Short one.")
+            self.assertEqual(Config().popup_style, "classic")
+        finally:
+            root.destroy()
