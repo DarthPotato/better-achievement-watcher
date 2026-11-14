@@ -7,6 +7,7 @@ click-through so it never steals focus from the game. It shows over windowed and
 borderless-windowed games; nothing but an in-game overlay shows over exclusive fullscreen.
 """
 
+import array
 import math
 import struct
 import subprocess
@@ -109,11 +110,57 @@ def sound_path(config: Config) -> Path:
     return _chime_path()
 
 
+NORMALIZED_PEAK = 0.89  # about -1 dBFS
+
+
+def _adjusted(path: Path, volume: int, normalize: bool) -> Path:
+    """A copy of a 16-bit WAV with its peak evened out and/or its volume scaled, cached in the
+    data folder (made from the user's own file, never shipped). The original on failure."""
+    volume = max(1, min(100, int(volume)))
+    if not normalize and volume >= 100:
+        return path
+    try:
+        stat = path.stat()
+        out = data_dir() / "sounds" / f"{path.stem}-{int(stat.st_mtime)}-{stat.st_size}-{volume}-{int(normalize)}.wav"
+        if out.is_file():
+            return out
+        with wave.open(str(path), "rb") as src:
+            params = src.getparams()
+            frames = src.readframes(src.getnframes())
+        if params.sampwidth != 2 or params.comptype != "NONE":
+            return path
+        samples = array.array("h", frames)
+        if sys.byteorder == "big":
+            samples.byteswap()
+        peak = max((abs(s) for s in samples), default=0) or 1
+        gain = (NORMALIZED_PEAK * 32767 / peak if normalize else 1.0) * volume / 100
+        scaled = array.array("h", (max(-32768, min(32767, int(s * gain))) for s in samples))
+        if sys.byteorder == "big":
+            scaled.byteswap()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        temp = out.with_suffix(".part")
+        with wave.open(str(temp), "wb") as dst:
+            dst.setparams(params)
+            dst.writeframes(scaled.tobytes())
+        temp.replace(out)
+        return out
+    except Exception:
+        return path
+
+
+def prepared_sound(config: Config) -> Path:
+    """The file to play: Steam's sounds evened out (the desktop one is ~4 dB quieter than the
+    others), everything scaled by the volume setting."""
+    path = sound_path(config)
+    steam = not (config.sound_file and Path(config.sound_file).is_file()) and config.sound_style in STEAM_SOUNDS
+    return _adjusted(path, getattr(config, "sound_volume", 100), normalize=steam and path.name != "chime.wav")
+
+
 def play_sound(config: Config) -> None:
     if not config.sound:
         return
     try:
-        sound = sound_path(config)
+        sound = prepared_sound(config)
         if sys.platform == "win32":
             import winsound
 

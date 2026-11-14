@@ -902,3 +902,31 @@ class StatsIniTests(unittest.TestCase):
         self.assertEqual(parse_bytes(text), {})
         self.assertEqual(parse_bytes(b"[Whatever]\nKILLS=1\nDISTANCE=120\n"), {})  # counters by their values
         self.assertEqual(unlocked(parse_bytes(b"[Achievements]\nACH_A=1\nACH_B=0\n")), {"ACH_A"})  # still a flat list
+
+
+class SoundVolumeTests(unittest.TestCase):
+    def test_quiet_steam_sound_is_evened_out_and_volume_scales(self):
+        import array
+        import wave
+
+        from baw import notify
+
+        steam = Path(tempfile.mkdtemp(dir=TMP))
+        quiet = steam / "steamui" / "sounds" / "desktop_toast_default.wav"
+        quiet.parent.mkdir(parents=True)
+        with wave.open(str(quiet), "wb") as out:
+            out.setnchannels(1), out.setsampwidth(2), out.setframerate(8000)
+            out.writeframes(array.array("h", [0, 6000, -6000, 3000] * 100).tobytes())
+
+        def peak(path):
+            with wave.open(str(path)) as w:
+                return max(abs(s) for s in array.array("h", w.readframes(w.getnframes())))
+
+        with mock.patch.object(notify, "steam_install_dir", return_value=steam):
+            full = notify.prepared_sound(Config())
+            half = notify.prepared_sound(Config(sound_volume=50))
+            custom = notify.prepared_sound(Config(sound_file=str(quiet)))
+        self.assertAlmostEqual(peak(full), 0.89 * 32767, delta=50)  # evened out to about -1 dBFS
+        self.assertAlmostEqual(peak(half), peak(full) / 2, delta=50)
+        self.assertEqual(custom, quiet)  # someone's own file is played as it is at 100%
+        self.assertEqual(peak(quiet), 6000)  # the Steam file itself is never changed
