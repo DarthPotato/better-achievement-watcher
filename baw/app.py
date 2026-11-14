@@ -834,7 +834,8 @@ class SettingsDialog:
         height = min(wanted, win.winfo_screenheight() - int(120 * max(1.0, win.winfo_fpixels("1i") / 96.0)))
         win.geometry(f"{max(680, body.winfo_reqwidth() + scroll.winfo_reqwidth())}x{height}")
 
-    SOUND_LABELS = {"steam": "Steam achievement sound", "chime": "Built-in chime", "custom": "Custom .wav file"}
+    SOUND_LABELS = {"steam": "Steam achievement sound", "steam_deck": "Steam Deck / Big Picture sound",
+                    "chime": "Built-in chime", "custom": "Custom .wav file"}
 
     def _sound_label(self, style: str, sound_file: str) -> str:
         return self.SOUND_LABELS["custom" if sound_file else style if style in self.SOUND_LABELS else "steam"]
@@ -842,7 +843,7 @@ class SettingsDialog:
     def _sound_row(self, parent) -> ttk.Frame:
         row = ttk.Frame(parent)
         combo = ttk.Combobox(row, textvariable=self.sound_choice, state="readonly",
-                             values=list(self.SOUND_LABELS.values()), width=26)
+                             values=list(self.SOUND_LABELS.values()), width=30)
         combo.pack(side="left")
 
         def chosen(_event=None) -> None:

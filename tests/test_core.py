@@ -307,7 +307,11 @@ class MoreDetectionTests(unittest.TestCase):
         steam = Path(tempfile.mkdtemp(dir=TMP))
         write(steam / "steamui/sounds/deck_ui_achievement_toast.wav", "RIFF")
         with mock.patch.object(notify, "steam_install_dir", return_value=steam):
+            # only the Deck sound there: the default falls back to it
             self.assertEqual(notify.sound_path(Config()).name, "deck_ui_achievement_toast.wav")
+            write(steam / "steamui/sounds/desktop_toast_default.wav", "RIFF")
+            self.assertEqual(notify.sound_path(Config()).name, "desktop_toast_default.wav")  # desktop client
+            self.assertEqual(notify.sound_path(Config(sound_style="steam_deck")).name, "deck_ui_achievement_toast.wav")
             self.assertEqual(notify.sound_path(Config(sound_style="chime")).name, "chime.wav")
 
 
