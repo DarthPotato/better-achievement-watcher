@@ -347,11 +347,7 @@ class Notifier:
         icon = load_icon(spec.icon, icon_size)
         win._icon = icon  # keep a reference so Tk doesn't drop the image
         pad = int(12 * scale)
-        if icon is not None:
-            tk.Label(win, image=icon, bg=BG, bd=0).place(x=pad, y=(height - icon_size) // 2)
-        else:
-            tk.Label(win, text="\U0001F3C6", font=("Segoe UI Emoji", -int(38 * scale)), fg=GOLD, bg=BG).place(
-                x=pad, y=(height - icon_size) // 2, width=icon_size, height=icon_size)
+        self._icon_with_glow(win, spec, icon, icon_size, pad, (height - icon_size) // 2, scale)
         text_x = pad * 2 + icon_size
         wrap = width - text_x - pad
         tk.Label(win, text=spec.header.upper(), font=("Segoe UI", -int(11 * scale), "bold"), fg=FG_DIM, bg=BG,
@@ -371,6 +367,23 @@ class Notifier:
                  spec.percent < 10 else FG_DIM, bg=BG, anchor="w").place(x=text_x, y=height - int(20 * scale), width=wrap)
 
         self._show(win, width, height, foreground)
+
+    def _icon_with_glow(self, win: tk.Toplevel, spec: PopupSpec, icon, size: int, x: int, y: int,
+                        scale: float) -> None:
+        """The achievement icon, with a golden glow around it when it's rare (like Steam's library)."""
+        spread = int(8 * scale)
+        art = tk.Canvas(win, width=size + 2 * spread, height=size + 2 * spread, bg=BG, highlightthickness=0, bd=0)
+        art.place(x=x - spread, y=y - spread)
+        if spec.percent is not None and spec.percent < RARE_PERCENT:
+            glow = _glow_image(size, spread)
+            if glow is not None:
+                art.create_image(spread + size // 2, spread + size // 2, image=glow)
+                art._glow = glow  # keep a reference so Tk doesn't drop the image
+        if icon is not None:
+            art.create_image(spread, spread, image=icon, anchor="nw")
+        else:
+            art.create_text(spread + size // 2, spread + size // 2, text="\U0001F3C6",
+                            font=("Segoe UI Emoji", -int(34 * scale)), fill=GOLD)
 
     def _show(self, win: tk.Toplevel, width: int, height: int, foreground: int, radius: int = 0) -> None:
         win.geometry(f"{width}x{height}+{-10000}+{-10000}")
