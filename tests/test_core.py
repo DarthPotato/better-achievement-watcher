@@ -841,6 +841,76 @@ class EpicEmulatorTests(unittest.TestCase):
         self.assertEqual((schema.title, schema.info("ACH_WIN").title), ("Fall Guys", "Winner"))
 
 
+class GalaxyDbTests(unittest.TestCase):
+    def _make_db(self, base):
+        import sqlite3
+
+        apps = base / "L" / "GOG.com" / "Galaxy" / "Applications" / "555" / "Gameplay" / "42"
+        apps.mkdir(parents=True)
+        db = sqlite3.connect(str(apps / "gameplay.db"))
+        db.executescript(
+            "CREATE TABLE database_info (key TEXT, value TEXT);"
+            "INSERT INTO database_info VALUES ('achievements_retrieved', '1');"
+            "CREATE TABLE achievement (key TEXT, name TEXT, description TEXT, visible_while_locked INTEGER,"
+            " unlock_time TEXT, image_url_locked TEXT, image_url_unlocked TEXT, rarity REAL);"
+            "INSERT INTO achievement VALUES ('A_WIN', 'Winner', 'Win', 1, '2024-05-01T10:00:00Z', 'l.png', 'u.png', 12.345);"
+            "INSERT INTO achievement VALUES ('A_SECRET', 'Secret', 'Shh', 0, NULL, 'l2.png', 'u2.png', 1.0);")
+        db.commit()
+        db.close()
+        cat = base / "PD" / "GOG.com" / "Galaxy" / "storage"
+        cat.mkdir(parents=True)
+        db = sqlite3.connect(str(cat / "galaxy-2.0.db"))
+        db.executescript(
+            "CREATE TABLE ProductAuthorizations (productId INTEGER, clientId TEXT);"
+            "CREATE TABLE LimitedDetails (productId INTEGER, title TEXT, languageId TEXT, stored_at TEXT);"
+            "INSERT INTO ProductAuthorizations VALUES (1, '555');"
+            "INSERT INTO LimitedDetails VALUES (1, 'Galaxy Game', '16', '2024');")
+        db.commit()
+        db.close()
+        return apps / "gameplay.db"
+
+    def test_reads_unlocks_schema_and_lists_the_game(self):
+        from baw import galaxy_db
+
+        base = Path(tempfile.mkdtemp(dir=TMP))
+        save = self._make_db(base)
+        states = galaxy_db.parse(save)
+        self.assertEqual(unlocked(states), {"A_WIN"})
+        self.assertEqual(states["A_WIN"].unlock_time, 1714557600)
+        self.assertEqual(galaxy_db._unix_time(1714557600123), 1714557600)
+        self.assertEqual(galaxy_db._unix_time(None), 0)
+        self.assertIsNone(galaxy_db.parse(base / "missing.db"))
+
+        env = {"APPDATA": str(base / "R"), "LOCALAPPDATA": str(base / "L"), "PUBLIC": str(base / "P"),
+               "PROGRAMDATA": str(base / "PD"), "USERPROFILE": str(base / "U")}
+        config = Config(include_steam_library=False, scan_common_game_folders=False)
+        store = SchemaStore(config, offline=True)
+        popups = []
+        with mock.patch.dict(os.environ, env):
+            w = Watcher(config, store, on_unlock=lambda appid, new: popups.append(new))
+            w.initial_scan()
+        game = w.snapshot()[0]
+        self.assertEqual(len(game.unlocked), 1)
+        schema = store.get(game.appid)
+        self.assertEqual((schema.title, schema.info("A_WIN").title), ("Galaxy Game", "Winner"))
+        self.assertTrue(schema.info("A_SECRET").hidden)
+        self.assertEqual(schema.info("A_WIN").percent, 12.3)
+        self.assertEqual(popups, [])  # viewer only: Galaxy shows its own popup
+
+    def test_list_not_fetched_yet_is_empty_not_unreadable(self):
+        import sqlite3
+
+        from baw import galaxy_db
+
+        base = Path(tempfile.mkdtemp(dir=TMP))
+        save = self._make_db(base)
+        db = sqlite3.connect(str(save))
+        db.execute("UPDATE database_info SET value = '0'")
+        db.commit()
+        db.close()
+        self.assertEqual(galaxy_db.parse(save), {})
+
+
 class BuildTests(unittest.TestCase):
     def test_app_does_not_import_what_the_exe_leaves_out(self):
         import ast
