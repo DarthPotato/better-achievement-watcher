@@ -9,7 +9,7 @@ from typing import Dict, Iterator, List, Optional
 from .config import Config
 from .locations import SAVE_FILE_NAMES, SaveRoot, common_game_folders, default_roots, steam_install_dir
 from .steam_local import STEAM_SOURCE, stats_files
-from . import epic, gog, native, xbox
+from . import epic, galaxy_db, gog, native, xbox
 
 STEAM_API_DLLS = {"steam_api.dll", "steam_api64.dll"}
 SKIP_DIRS = {".git", "node_modules", "__pycache__", "$recycle.bin", "windows", "system volume information"}
@@ -113,6 +113,7 @@ def scan_save_roots(config: Config) -> List[SaveFile]:
     if config.scan_default_locations:
         saves.extend(SaveFile(game.appid, path, game.source) for game, path in native.find_saves())
         saves.extend(SaveFile(epic.game_id(path), path, epic.SOURCE) for path in epic.find_saves())
+        saves.extend(SaveFile(galaxy_db.game_id(path), path, galaxy_db.SOURCE) for path in galaxy_db.find_saves())
     if config.include_steam_library:
         saves.extend(SaveFile(appid, path, STEAM_SOURCE) for appid, path in stats_files(steam_install_dir()))
     return saves

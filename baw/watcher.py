@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from .config import Config
-from . import epic, gog, native
+from . import epic, galaxy_db, gog, native
 from .parsers import AchievementState, parse_file
 from .scanner import SaveFile, scan_game_folders, scan_save_roots
 from .steam_local import STEAM_SOURCE, installed_appids, parse_steam_stats
@@ -198,6 +198,10 @@ class Watcher:
                     schema = epic.build_schema(save.path)
                     if schema is not None:
                         self.store.register_fixed_schema(schema)
+                if save.emulator == galaxy_db.SOURCE:
+                    schema = galaxy_db.build_schema(save.path)
+                    if schema is not None:
+                        self.store.register_fixed_schema(schema)
                 self._refresh(self._files[save.path], notify)
         # Forget files that were deleted.
         with self._lock:
@@ -214,7 +218,8 @@ class Watcher:
         if tracked.save.emulator == STEAM_SOURCE:
             states = parse_steam_stats(tracked.save.path)
         else:
-            parser = epic.parse if tracked.save.emulator == epic.SOURCE else native.parser_for(tracked.save.emulator)
+            parser = {epic.SOURCE: epic.parse, galaxy_db.SOURCE: galaxy_db.parse}.get(tracked.save.emulator)
+            parser = parser or native.parser_for(tracked.save.emulator)
             states = (parser or parse_file)(tracked.save.path)
         if states is None:
             # Probably caught the emulator mid-write: retry on the next poll. A file that
@@ -222,8 +227,8 @@ class Watcher:
             if time.time() - signature[0] > 2:
                 tracked.signature = signature
             return False
-        # Steam already announces achievements of games you own.
-        notify = notify and not tracked.quiet and tracked.save.emulator != STEAM_SOURCE
+        # Steam and Galaxy already announce achievements of games they run.
+        notify = notify and not tracked.quiet and tracked.save.emulator not in (STEAM_SOURCE, galaxy_db.SOURCE)
         tracked.quiet = False
         appid = tracked.save.appid
         with self._lock:
