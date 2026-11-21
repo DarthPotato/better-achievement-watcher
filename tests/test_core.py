@@ -845,6 +845,33 @@ class EpicEmulatorTests(unittest.TestCase):
         self.assertEqual((schema.title, schema.info("ACH_WIN").title), ("Fall Guys", "Winner"))
 
 
+class UniverseLanTests(unittest.TestCase):
+    def test_finds_and_reads_achievements_ini(self):
+        from baw import universelan
+
+        base = Path(tempfile.mkdtemp(dir=TMP))
+        folder = base / "L" / "UniverseLAN" / "1207658924" / "UniverseLANData"
+        folder.mkdir(parents=True)
+        (folder / "Achievements.ini").write_text(
+            "[WIN]\nUnlocked=1\nUnlockTime=1700000000\nDescription=Win once\nVisibleWhileLocked=1\n"
+            "[SECRET]\nUnlocked=0\nUnlockTime=0\nDescription=Shh\nVisibleWhileLocked=0\n", encoding="utf-8")
+        (base / "L" / "UniverseLAN" / "notes").mkdir()
+        env = {"APPDATA": str(base / "R"), "LOCALAPPDATA": str(base / "L"), "PUBLIC": str(base / "P"),
+               "PROGRAMDATA": str(base / "PD"), "USERPROFILE": str(base / "U")}
+        config = Config(include_steam_library=False, scan_common_game_folders=False)
+        store = SchemaStore(config, offline=True)
+        popups = []
+        with mock.patch.dict(os.environ, env):
+            w = Watcher(config, store, on_unlock=lambda appid, new: popups.append(new))
+            w.initial_scan()
+        game = w.snapshot()[0]
+        self.assertEqual({a.name for a in game.unlocked}, {"WIN"})
+        self.assertEqual(game.unlocked[0].unlock_time, 1700000000)
+        schema = store.get(game.appid)
+        self.assertEqual(schema.info("WIN").description, "Win once")
+        self.assertTrue(schema.info("SECRET").hidden)
+
+
 class BuildTests(unittest.TestCase):
     def test_app_does_not_import_what_the_exe_leaves_out(self):
         import ast

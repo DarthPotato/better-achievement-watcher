@@ -5,3 +5,5 @@ dist/
 *.spec
 .venv/
 CLAUDE.md
+
+POST_DRAFT.md

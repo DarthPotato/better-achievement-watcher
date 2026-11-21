@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 from .config import Config
-from . import epic, gog, native
+from . import epic, gog, native, universelan
 from .parsers import AchievementState, parse_file
 from .scanner import SaveFile, scan_game_folders, scan_save_roots
 from .steam_local import STEAM_SOURCE, installed_appids, parse_steam_stats
@@ -196,6 +196,10 @@ class Watcher:
             if not known:
                 if save.emulator == epic.SOURCE:  # names and icons come with the save
                     schema = epic.build_schema(save.path)
+                    if schema is not None:
+                        self.store.register_fixed_schema(schema)
+                if save.emulator == universelan.SOURCE:
+                    schema = universelan.build_schema(save.path)
                     if schema is not None:
                         self.store.register_fixed_schema(schema)
                 self._refresh(self._files[save.path], notify)
